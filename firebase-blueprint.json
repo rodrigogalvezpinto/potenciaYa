@@ -1,0 +1,250 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Usuario registrado en la plataforma PotenciaRedes",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID", "maxLength": 128 },
+        "email": { "type": "string", "description": "Correo electrónico del cliente", "maxLength": 256 },
+        "displayName": { "type": "string", "description": "Nombre o alias comercial", "maxLength": 128 },
+        "role": { "type": "string", "description": "Rol del usuario: CUSTOMER, ADMIN o SUPER_ADMIN", "enum": ["CUSTOMER", "ADMIN", "SUPER_ADMIN"] },
+        "status": { "type": "string", "description": "Estado de la cuenta: ACTIVE o BLOCKED", "enum": ["ACTIVE", "BLOCKED"] },
+        "totalSpent": { "type": "number", "description": "Total acumulado gastado en CLP" },
+        "orderCount": { "type": "number", "description": "Cantidad total de órdenes generadas" },
+        "createdAt": { "type": "string", "description": "Timestamp ISO de creación" },
+        "updatedAt": { "type": "string", "description": "Timestamp ISO de última actualización" }
+      },
+      "required": ["uid", "email", "role", "status", "createdAt"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Registro de UID con permisos administrativos",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "role": { "type": "string", "enum": ["ADMIN", "SUPER_ADMIN"] },
+        "grantedAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Service": {
+      "title": "Service",
+      "description": "Servicio comercial de redes sociales en catálogo",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "providerServiceId": { "type": "string", "maxLength": 64 },
+        "provider": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 256 },
+        "category": { "type": "string", "maxLength": 128 },
+        "platform": { "type": "string", "maxLength": 64 },
+        "type": { "type": "string", "maxLength": 64 },
+        "originalRateUSD": { "type": "number", "description": "Tarifa por 1000 del proveedor en USD" },
+        "commercialRateCLP": { "type": "number", "description": "Precio comercial por 1000 en CLP" },
+        "minQuantity": { "type": "number" },
+        "maxQuantity": { "type": "number" },
+        "refill": { "type": "boolean" },
+        "cancel": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "featured": { "type": "boolean" },
+        "description": { "type": "string", "maxLength": 2048 },
+        "linkType": { "type": "string", "maxLength": 64 },
+        "marginMultiplier": { "type": "number" },
+        "lastSyncedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "category", "platform", "originalRateUSD", "commercialRateCLP", "minQuantity", "maxQuantity", "active"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Pedido comercial de un cliente",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 256 },
+        "serviceId": { "type": "string", "maxLength": 64 },
+        "serviceName": { "type": "string", "maxLength": 256 },
+        "platform": { "type": "string", "maxLength": 64 },
+        "targetUrl": { "type": "string", "maxLength": 1024 },
+        "quantity": { "type": "number" },
+        "unitPriceCLP": { "type": "number" },
+        "totalPriceCLP": { "type": "number" },
+        "providerCostUSD": { "type": "number" },
+        "exchangeRateCLP": { "type": "number" },
+        "estimatedGrossProfitCLP": { "type": "number" },
+        "status": {
+          "type": "string",
+          "enum": [
+            "AWAITING_PAYMENT",
+            "PAID",
+            "PAID_WAITING_PROVIDER_BALANCE",
+            "QUEUED",
+            "SUBMITTING",
+            "SUBMITTED",
+            "PENDING",
+            "IN_PROGRESS",
+            "PARTIAL",
+            "COMPLETED",
+            "CANCELED",
+            "FAILED",
+            "REQUIRES_RECONCILIATION"
+          ]
+        },
+        "paymentId": { "type": "string", "maxLength": 128 },
+        "providerOrderId": { "type": "string", "maxLength": 128 },
+        "startCount": { "type": "number" },
+        "remains": { "type": "number" },
+        "refillAvailable": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "serviceId", "targetUrl", "quantity", "totalPriceCLP", "status", "createdAt"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Transacción de pago con Webpay o Mercado Pago",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "orderId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "gateway": { "type": "string", "enum": ["WEBPAY_PLUS", "MERCADO_PAGO"] },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "enum": ["CLP"] },
+        "status": {
+          "type": "string",
+          "enum": ["CREATED", "PENDING", "APPROVED", "REJECTED", "CANCELED", "REFUNDED", "EXPIRED", "ERROR"]
+        },
+        "gatewayToken": { "type": "string", "maxLength": 256 },
+        "gatewayReference": { "type": "string", "maxLength": 256 },
+        "authorizationCode": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "orderId", "gateway", "amount", "currency", "status", "createdAt"]
+    },
+    "RefillRequest": {
+      "title": "RefillRequest",
+      "description": "Solicitud de refill o reposición de servicio",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "orderId": { "type": "string", "maxLength": 128 },
+        "providerOrderId": { "type": "string", "maxLength": 128 },
+        "providerRefillId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["PENDING", "SUBMITTED", "APPROVED", "REJECTED", "COMPLETED"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "orderId", "userId", "status", "createdAt"]
+    },
+    "Setting": {
+      "title": "Setting",
+      "description": "Parámetro de configuración del sistema",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "maxLength": 128 },
+        "value": { "type": "string", "maxLength": 2048 },
+        "category": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["key", "category", "updatedAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Notificación para el usuario",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "message": { "type": "string", "maxLength": 1024 },
+        "type": { "type": "string", "enum": ["INFO", "SUCCESS", "WARNING", "ERROR"] },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "title", "message", "read", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Registro de auditoría administrativa y eventos críticos",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "actorUid": { "type": "string", "maxLength": 128 },
+        "actorEmail": { "type": "string", "maxLength": 256 },
+        "action": { "type": "string", "maxLength": 128 },
+        "targetResource": { "type": "string", "maxLength": 128 },
+        "details": { "type": "string", "maxLength": 2048 },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "actorUid", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Colección de perfiles de clientes y usuarios"
+    },
+    "/admins/{adminId}": {
+      "schema": "AdminRecord",
+      "description": "Colección de UIDs autorizados como administradores"
+    },
+    "/services/{serviceId}": {
+      "schema": "Service",
+      "description": "Catálogo de servicios de redes sociales y precios"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Colección de pedidos comerciales de clientes"
+    },
+    "/payments/{paymentId}": {
+      "schema": "Payment",
+      "description": "Transacciones de pago asociadas a pedidos"
+    },
+    "/refills/{refillId}": {
+      "schema": "RefillRequest",
+      "description": "Solicitudes de reposición o refill"
+    },
+    "/settings/{settingId}": {
+      "schema": "Setting",
+      "description": "Configuraciones globales del sistema (márgenes, FX, etc.)"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Notificaciones para los clientes"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Registro de auditoría inmutable"
+    },
+    "/provider_services/{serviceId}": {
+      "schema": "Service",
+      "description": "Catálogo técnico de servicios de proveedores"
+    },
+    "/commercial_services/{serviceId}": {
+      "schema": "Service",
+      "description": "Catálogo comercial de PotenciaRedes con modalidades"
+    },
+    "/job_queue/{jobId}": {
+      "schema": "Order",
+      "description": "Cola de ejecución y reintento de pedidos"
+    },
+    "/admin_notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Centro de notificaciones e incidencias administrativas"
+    },
+    "/provider_balance_history/{recordId}": {
+      "schema": "Setting",
+      "description": "Historial de saldo de proveedores"
+    },
+    "/provider_sync_history/{recordId}": {
+      "schema": "Setting",
+      "description": "Historial de sincronización de catálogo"
+    }
+  }
+}
