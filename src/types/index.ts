@@ -1,6 +1,6 @@
 export type UserRole = 'CUSTOMER' | 'ADMIN' | 'SUPER_ADMIN';
 
-export type ServiceTier = 'ECONOMICO' | 'ESTANDAR' | 'PREMIUM';
+export type ServiceTier = 'FREE' | 'PREMIUM';
 
 export type SyncStatus = 'SYNCED' | 'MODIFIED' | 'POSSIBLY_UNAVAILABLE' | 'INACTIVE';
 
@@ -100,6 +100,8 @@ export interface CommercialOrder {
   userEmail: string;
   serviceId: string;
   serviceName: string;
+  tier?: ServiceTier;
+  technicalServiceId?: string;
   platform: string;
   targetUrl: string;
   quantity: number;
@@ -114,7 +116,8 @@ export interface CommercialOrder {
   estimatedNetProfitCLP: number;
   status: OrderStatus;
   paymentId?: string;
-  paymentGateway?: 'WEBPAY_PLUS' | 'MERCADO_PAGO';
+  paymentUrl?: string;
+  paymentGateway?: 'FLOW';
   providerOrderId?: string;
   providerStatus?: string;
   startCount?: number;
@@ -238,11 +241,13 @@ export interface TestResult {
 export interface SystemSettings {
   usdClpRate: number;
   defaultGlobalMarginPercent: number;
+  freeBasePriceCLP?: number;
+  freeMicroPriceCLP?: number;
+  premiumBasePriceCLP?: number;
   systemFollowsApiUrl: string;
   systemFollowsConfigured: boolean;
-  webpayEnvironment: string;
-  webpayCommerceCode: string;
-  mercadopagoEnvironment: string;
+  flowEnvironment?: string;
+  flowConfigured?: boolean;
   adminEmails: string[];
   thresholds?: BalanceThresholds;
 }

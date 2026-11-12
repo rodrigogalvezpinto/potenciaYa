@@ -1,10 +1,9 @@
 import { systemFollowsProvider } from '../providers/smm/systemFollows.ts';
-import { SMMRawService } from '../providers/smm/types.ts';
 import { pricingEngine } from './pricingEngine.ts';
 import { notificationService } from './notificationService.ts';
 import { adminFirestore } from '../firebaseAdmin.ts';
 
-export type ServiceTier = 'ECONOMICO' | 'ESTANDAR' | 'PREMIUM';
+export type ServiceTier = 'FREE' | 'PREMIUM';
 
 export type SyncStatus = 'SYNCED' | 'MODIFIED' | 'POSSIBLY_UNAVAILABLE' | 'INACTIVE';
 
@@ -41,16 +40,16 @@ export interface ProviderTechnicalService {
 }
 
 // -------------------------------------------------------------
-// NIVEL 2: CATÁLOGO COMERCIAL DE POTENCIAREDES
+// NIVEL 2: CATÁLOGO COMERCIAL DE POTENCIAREDES (Plan Free & Plan Premium)
 // -------------------------------------------------------------
 export interface CommercialCatalogService {
-  id: string; // ej: "COMM-IG-SEGUIDORES-PREMIUM"
+  id: string; // ej: "COMM-INSTAGRAM-SEGUIDORES-FREE" o "...-PREMIUM"
   published: boolean;
   commercialName: string;
   description: string;
   platform: 'Instagram' | 'TikTok' | 'YouTube' | 'Facebook' | 'X' | 'Spotify' | 'Telegram' | 'Otro';
   commercialCategory: string; // "Seguidores", "Likes", "Visualizaciones", "Comentarios"
-  tier: ServiceTier; // ECONOMICO, ESTANDAR, PREMIUM
+  tier: ServiceTier; // FREE o PREMIUM
   technicalServiceId: string; // ID del servicio técnico activo asociado
   provider: string;
   originalRateUSD: number;
@@ -81,35 +80,41 @@ export interface SyncHistoryRecord {
 }
 
 export class CatalogService {
-  // Catálogo Técnico de Proveedores
   private technicalServices: Map<string, ProviderTechnicalService> = new Map();
-  // Catálogo Comercial de PotenciaRedes
   private commercialServices: Map<string, CommercialCatalogService> = new Map();
-  // Historial de sincronizaciones
   private syncHistory: SyncHistoryRecord[] = [];
   private lastSyncTime: string | null = null;
   private isSyncing = false;
 
   constructor() {
     this.initialize();
+    // Sincronización periódica automática cada 15 minutos para detectar cambios de IDs o tarifas
+    setInterval(() => {
+      this.syncTechnicalCatalog().catch(err => console.warn('Periodic catalog sync warning:', err?.message || err));
+    }, 15 * 60 * 1000);
   }
 
   private async initialize() {
     await this.loadFromFirestore();
-    // Ejecutar primera sincronización con el catálogo base de SystemFollows
     await this.syncTechnicalCatalog();
   }
 
   private async loadFromFirestore() {
     try {
-      const techSnap = await adminFirestore.collection('provider_services').limit(200).get();
+      const techSnap = await adminFirestore.collection('provider_services').limit(250).get();
       techSnap.forEach(doc => {
         this.technicalServices.set(doc.id, doc.data() as ProviderTechnicalService);
       });
 
-      const commSnap = await adminFirestore.collection('commercial_services').limit(200).get();
+      const commSnap = await adminFirestore.collection('commercial_services').limit(250).get();
       commSnap.forEach(doc => {
-        this.commercialServices.set(doc.id, doc.data() as CommercialCatalogService);
+        const data = doc.data() as any;
+        // Limpiar registros legados ECONOMICO / ESTANDAR para mantener solo FREE y PREMIUM
+        if (doc.id.endsWith('-ECONOMICO') || doc.id.endsWith('-ESTANDAR') || (data.tier !== 'FREE' && data.tier !== 'PREMIUM')) {
+          adminFirestore.collection('commercial_services').doc(doc.id).delete().catch(() => {});
+          return;
+        }
+        this.commercialServices.set(doc.id, data as CommercialCatalogService);
       });
 
       const syncSnap = await adminFirestore.collection('provider_sync_history')
@@ -138,6 +143,7 @@ export class CatalogService {
 
   public detectCommercialCategory(name: string, category: string): string {
     const combined = `${name} ${category}`.toLowerCase();
+    if (combined.includes('suscriptor') || combined.includes('subscriber')) return 'Suscriptores';
     if (combined.includes('seguidor') || combined.includes('follower')) return 'Seguidores';
     if (combined.includes('like') || combined.includes('me gusta')) return 'Likes';
     if (combined.includes('reproducci') || combined.includes('vista') || combined.includes('view')) return 'Visualizaciones';
@@ -191,7 +197,6 @@ export class CatalogService {
         const existing = this.technicalServices.get(internalId);
 
         if (!existing) {
-          // 1. Servicio nuevo detectado
           newCount++;
           const newService: ProviderTechnicalService = {
             id: internalId,
@@ -217,23 +222,20 @@ export class CatalogService {
           this.technicalServices.set(internalId, newService);
           this.persistTechnicalService(newService).catch(console.warn);
 
-          // Notificar servicio nuevo
           await notificationService.notify({
             title: `Nuevo servicio detectado en ${providerName}`,
-            description: `Se detectó "${raw.name}" (ID #${providerServiceId}) en ${platform}. Disponible para revisión y publicación comercial.`,
+            description: `Se detectó "${raw.name}" (ID #${providerServiceId}) en ${platform}. Evaluado automáticamente para Free/Premium.`,
             level: 'INFO',
             entityType: 'SERVICE',
             entityId: internalId,
             actionUrl: '/admin?tab=catalog',
-            recommendedAction: 'Revisar y asignar modalidad comercial en el catálogo comercial.',
+            recommendedAction: 'Revisar asignación comercial si corresponde.',
           });
         } else {
-          // 2. Verificar modificaciones contra versión anterior
           const changes: ServiceChangeRecord[] = [];
           if (existing.rateUSD !== rateUSD) {
             changes.push({ field: 'rateUSD', oldValue: existing.rateUSD, newValue: rateUSD, timestamp: now });
-            // Alerta si el precio subió más de 15%
-            const percentIncrease = ((rateUSD - existing.rateUSD) / existing.rateUSD) * 100;
+            const percentIncrease = existing.rateUSD > 0 ? ((rateUSD - existing.rateUSD) / existing.rateUSD) * 100 : 0;
             if (percentIncrease > 15) {
               await notificationService.notify({
                 title: `Aumento de tarifa en servicio #${providerServiceId}`,
@@ -242,7 +244,7 @@ export class CatalogService {
                 entityType: 'SERVICE',
                 entityId: internalId,
                 actionUrl: '/admin?tab=catalog',
-                recommendedAction: 'Verificar impacto en el margen de ganancia comercial.',
+                recommendedAction: 'El motor de precios ajustó el piso CLP automáticamente si superó el tramo.',
               });
             }
           }
@@ -277,26 +279,24 @@ export class CatalogService {
         }
       }
 
-      // 3. Detectar servicios que desaparecieron de la respuesta
+      // Detectar servicios que desaparecieron o cambiaron de ID en el proveedor
       for (const [id, techService] of this.technicalServices.entries()) {
         if (techService.provider === providerName && !currentFetchedIds.has(id)) {
           missingCount++;
-          if (techService.syncStatus === 'POSSIBLY_UNAVAILABLE') {
-            // Confirmado por segunda sincronización
+          if (techService.syncStatus === 'POSSIBLY_UNAVAILABLE' || techService.syncStatus === 'INACTIVE') {
             techService.syncStatus = 'INACTIVE';
             techService.available = false;
             techService.lastSyncedAt = now;
             await notificationService.notify({
-              title: `Servicio desactivado por el proveedor`,
-              description: `"${techService.name}" (#${techService.providerServiceId}) ha sido confirmado como inactivo en ${providerName}.`,
+              title: `ID #${techService.providerServiceId} retirado por el proveedor`,
+              description: `"${techService.name}" desapareció en ${providerName}. El sistema reasignará automáticamente un servicio equivalente.`,
               level: 'WARNING',
               entityType: 'SERVICE',
               entityId: id,
               actionUrl: '/admin?tab=catalog',
-              recommendedAction: 'Verificar si existen pedidos pendientes o reemplazar servicio comercial asociado.',
+              recommendedAction: 'Verificar servicio sustituto en el Comparador Inteligente.',
             });
           } else {
-            // Primera ausencia: marcar temporalmente pero NO borrar
             techService.syncStatus = 'POSSIBLY_UNAVAILABLE';
             techService.lastSyncedAt = now;
           }
@@ -306,7 +306,7 @@ export class CatalogService {
 
       this.lastSyncTime = now;
 
-      // 4. Actualizar o generar el Catálogo Comercial inteligente (auto-clasificación en Económico, Estándar, Premium)
+      // Reconstruir Catálogo Comercial Free vs Premium y reasignar IDs rotos
       this.rebuildCommercialCatalog();
 
       const record: SyncHistoryRecord = {
@@ -346,13 +346,21 @@ export class CatalogService {
   }
 
   /**
-   * Reconstruye y clasifica el Catálogo Comercial agrupando por Plataforma y Categoría.
-   * Divide en Económico, Estándar y Premium cuando existen alternativas verificadas.
+   * Reconstruye y clasifica el Catálogo Comercial en 2 planes claros:
+   * - Plan Free (FREE): busca siempre el servicio disponible más económico del proveedor.
+   * - Plan Premium (PREMIUM): busca un servicio disponible CON reposición (refill === true).
    */
   public rebuildCommercialCatalog(): void {
+    // Limpiar entradas antiguas que no sean FREE / PREMIUM
+    for (const [id, item] of this.commercialServices.entries()) {
+      if (!id.endsWith('-FREE') && !id.endsWith('-PREMIUM') || (item.tier !== 'FREE' && item.tier !== 'PREMIUM')) {
+        this.commercialServices.delete(id);
+        adminFirestore.collection('commercial_services').doc(id).delete().catch(() => {});
+      }
+    }
+
     const activeTechServices = Array.from(this.technicalServices.values()).filter(s => s.available);
 
-    // Agrupar por plataforma y categoría comercial
     const groups = new Map<string, ProviderTechnicalService[]>();
     for (const service of activeTechServices) {
       const commCategory = this.detectCommercialCategory(service.name, service.category);
@@ -371,54 +379,40 @@ export class CatalogService {
       // Ordenar por precio ascendente
       const sortedByPrice = [...serviceList].sort((a, b) => a.rateUSD - b.rateUSD);
 
-      // Si hay servicios con refill, identificar el mejor candidato para Premium
-      const withRefill = serviceList.filter(s => s.refill);
-      const bestRefill = withRefill.length > 0 ? withRefill.sort((a, b) => b.rateUSD - a.rateUSD)[0] : null;
-
-      // 1. Modalidad Económico: menor precio, enfocado en volumen/precio competitivo
-      const econCandidate = sortedByPrice[0];
-      if (econCandidate) {
+      // 1. Plan Free: servicio más barato disponible (prioriza no-refill o el de menor tarifa USD)
+      const nonRefillCheapest = sortedByPrice.filter(s => !s.refill);
+      const freeCandidate = nonRefillCheapest.length > 0 ? nonRefillCheapest[0] : sortedByPrice[0];
+      if (freeCandidate) {
         this.upsertCommercialService({
-          id: `COMM-${platform.toUpperCase()}-${commercialCategory.toUpperCase()}-ECONOMICO`,
+          id: `COMM-${platform.toUpperCase()}-${commercialCategory.toUpperCase()}-FREE`,
           platform,
           commercialCategory,
-          tier: 'ECONOMICO',
-          technicalServiceId: econCandidate.id,
-          candidate: econCandidate,
-          titleSuffix: 'Económico (Precio Mayorista)',
-          descriptionSuffix: 'Modalidad económica orientada a máxima cantidad al menor costo en pesos chilenos.',
+          tier: 'FREE',
+          technicalServiceId: freeCandidate.id,
+          candidate: freeCandidate,
+          titleSuffix: 'Plan Free (Económico)',
+          descriptionSuffix: 'Opción económica al mejor precio. Busca automáticamente la ruta más barata y rápida.',
           now,
         });
       }
 
-      // 2. Modalidad Estándar: equilibrio calidad/precio
-      if (sortedByPrice.length > 1) {
-        const midIdx = Math.floor(sortedByPrice.length / 2);
-        const standardCandidate = sortedByPrice[midIdx];
-        this.upsertCommercialService({
-          id: `COMM-${platform.toUpperCase()}-${commercialCategory.toUpperCase()}-ESTANDAR`,
-          platform,
-          commercialCategory,
-          tier: 'ESTANDAR',
-          technicalServiceId: standardCandidate.id,
-          candidate: standardCandidate,
-          titleSuffix: 'Estándar (Equilibrio y Calidad)',
-          descriptionSuffix: 'Velocidad optimizada y mayor estabilidad para perfiles en crecimiento continuo.',
-          now,
-        });
-      }
+      // 2. Plan Premium: servicio CON reposición (refill === true), estabilidad superior
+      const withRefill = sortedByPrice.filter(s => s.refill);
+      // Si hay varias opciones con refill, elegir la de mayor calidad/estabilidad dentro del grupo con refill (o la más estable distinta de Free)
+      const premiumCandidate = withRefill.length > 0
+        ? (withRefill.find(s => s.id !== freeCandidate?.id) || withRefill[0])
+        : null;
 
-      // 3. Modalidad Premium: mayor calidad, retención y garantía de Refill (si existe candidato con refill)
-      if (bestRefill && bestRefill.id !== econCandidate.id) {
+      if (premiumCandidate) {
         this.upsertCommercialService({
           id: `COMM-${platform.toUpperCase()}-${commercialCategory.toUpperCase()}-PREMIUM`,
           platform,
           commercialCategory,
           tier: 'PREMIUM',
-          technicalServiceId: bestRefill.id,
-          candidate: bestRefill,
-          titleSuffix: 'Premium (Alta Retención & 30 Días Refill)',
-          descriptionSuffix: 'Máxima calidad documentada con garantía de reposición ante caídas por 30 días.',
+          technicalServiceId: premiumCandidate.id,
+          candidate: premiumCandidate,
+          titleSuffix: 'Plan Premium (Alta Estabilidad)',
+          descriptionSuffix: 'Rutas seleccionadas de alta estabilidad, retención superior y menor tasa de caída.',
           now,
         });
       }
@@ -439,18 +433,35 @@ export class CatalogService {
     const existing = this.commercialServices.get(params.id);
     const tech = this.technicalServices.get(params.technicalServiceId) || params.candidate;
 
-    // Calcular precio CLP con PricingEngine
-    const priceCalc = pricingEngine.calculate(tech.rateUSD, 1000, params.id, params.commercialCategory);
+    // Calcular precio CLP con PricingEngine (Free vs Premium + protección por tramos de costo)
+    const priceCalc = pricingEngine.calculate(
+      tech.rateUSD,
+      1000,
+      params.id,
+      params.commercialCategory,
+      'FLOW',
+      params.tier
+    );
 
-    // Si ya existe y fue configurado manualmente por el admin, respetar selección y título
+    // Si fue seleccionado manualmente y ese técnico SIGUE disponible, respetarlo;
+    // Si desapareció o se desactivó (!activeTech?.available), reasignar automáticamente al nuevo candidato!
     if (existing && existing.manualProviderSelection) {
-      const activeTech = this.technicalServices.get(existing.technicalServiceId) || tech;
-      const recacl = pricingEngine.calculate(activeTech.rateUSD, 1000, existing.id, existing.commercialCategory);
-      existing.commercialRateCLP = recacl.unitPricePer1000CLP;
-      existing.originalRateUSD = activeTech.rateUSD;
-      existing.refill = activeTech.refill;
-      existing.updatedAt = params.now;
-      return;
+      const currentTech = this.technicalServices.get(existing.technicalServiceId);
+      if (currentTech && currentTech.available) {
+        const recalc = pricingEngine.calculate(
+          currentTech.rateUSD,
+          1000,
+          existing.id,
+          existing.commercialCategory,
+          'FLOW',
+          existing.tier
+        );
+        existing.commercialRateCLP = recalc.unitPricePer1000CLP;
+        existing.originalRateUSD = currentTech.rateUSD;
+        existing.refill = existing.tier === 'PREMIUM' ? currentTech.refill : false;
+        existing.updatedAt = params.now;
+        return;
+      }
     }
 
     const cleanBaseName = `${params.platform} ${params.commercialCategory}`;
@@ -458,7 +469,7 @@ export class CatalogService {
       id: params.id,
       published: existing ? existing.published : true,
       commercialName: `${cleanBaseName} — ${params.titleSuffix}`,
-      description: `${params.descriptionSuffix} Inicio automático tras confirmación de pago.`,
+      description: `${params.descriptionSuffix} Inicio automático tras confirmar pago en Flow.`,
       platform: params.platform,
       commercialCategory: params.commercialCategory,
       tier: params.tier,
@@ -468,17 +479,117 @@ export class CatalogService {
       commercialRateCLP: priceCalc.unitPricePer1000CLP,
       minQuantity: tech.minQuantity,
       maxQuantity: tech.maxQuantity,
-      refill: tech.refill,
-      refillDays: tech.refill ? 30 : undefined,
+      refill: params.tier === 'PREMIUM' ? Boolean(tech.refill) : false,
+      refillDays: params.tier === 'PREMIUM' && tech.refill ? 30 : undefined,
       cancel: tech.cancel,
       linkType: params.platform === 'Instagram' ? 'Usuario (@usuario) o enlace de post' : 'Enlace público directo',
-      featured: params.tier === 'PREMIUM' || params.tier === 'ESTANDAR',
+      featured: params.tier === 'PREMIUM',
       manualProviderSelection: false,
       updatedAt: params.now,
     };
 
     this.commercialServices.set(params.id, commService);
     this.persistCommercialService(commService).catch(console.warn);
+  }
+
+  /**
+   * Resuelve dinámicamente el mejor servicio técnico en el proveedor justo antes de comprar:
+   * - Para FREE: busca el más barato disponible compatible con la cantidad solicitada.
+   * - Para PREMIUM: busca obligatoriamente uno disponible CON reposición (refill === true).
+   * - Si el ID actual falló (excludedTechIds) o fue removido por el proveedor, busca un reemplazo similar sin perder rentabilidad.
+   */
+  public resolveDispatchService(params: {
+    commercialServiceId: string;
+    quantity: number;
+    tier?: ServiceTier;
+    excludedTechIds?: string[];
+    maxAllowedTotalCostCLP?: number;
+  }): {
+    technicalService: ProviderTechnicalService | null;
+    wasAutoReassigned: boolean;
+    reason?: string;
+  } {
+    const excluded = new Set(params.excludedTechIds || []);
+    const comm = this.commercialServices.get(params.commercialServiceId);
+    const exchangeRate = pricingEngine.getExchangeRate();
+
+    const effectiveTier: ServiceTier = params.tier
+      || comm?.tier
+      || (params.commercialServiceId.toUpperCase().includes('PREMIUM') ? 'PREMIUM' : 'FREE');
+
+    const currentTech = comm ? this.technicalServices.get(comm.technicalServiceId) : this.technicalServices.get(params.commercialServiceId);
+
+    const isCompatible = (t: ProviderTechnicalService) => {
+      if (!t.available) return false;
+      if (excluded.has(t.id) || excluded.has(t.providerServiceId)) return false;
+      if (params.quantity < t.minQuantity || params.quantity > t.maxQuantity) return false;
+      if (effectiveTier === 'PREMIUM' && !t.refill) return false;
+      if (params.maxAllowedTotalCostCLP !== undefined) {
+        const orderCostCLP = (t.rateUSD / 1000) * params.quantity * exchangeRate;
+        if (orderCostCLP > params.maxAllowedTotalCostCLP) return false;
+      }
+      return true;
+    };
+
+    // Buscar alternativas equivalentes de la misma plataforma y categoría comercial
+    let candidates: ProviderTechnicalService[] = [];
+    if (comm) {
+      candidates = Array.from(this.technicalServices.values()).filter(t => {
+        const samePlat = t.platform === comm.platform;
+        const sameCat = this.detectCommercialCategory(t.name, t.category) === comm.commercialCategory;
+        return samePlat && sameCat && isCompatible(t);
+      });
+    } else if (currentTech) {
+      const cat = this.detectCommercialCategory(currentTech.name, currentTech.category);
+      candidates = Array.from(this.technicalServices.values()).filter(t => {
+        const samePlat = t.platform === currentTech.platform;
+        const sameCat = this.detectCommercialCategory(t.name, t.category) === cat;
+        return samePlat && sameCat && isCompatible(t);
+      });
+    }
+
+    // Ordenar candidatos por tarifa ascendente (más barato primero)
+    candidates.sort((a, b) => a.rateUSD - b.rateUSD);
+
+    // En Plan FREE siempre priorizamos el más barato disponible (a menos que esté bloqueado manualmente y válido)
+    if (effectiveTier === 'FREE') {
+      if (comm?.manualProviderSelection && currentTech && isCompatible(currentTech)) {
+        return { technicalService: currentTech, wasAutoReassigned: false };
+      }
+      if (candidates.length > 0) {
+        const best = candidates[0];
+        const reassigned = !currentTech || best.id !== currentTech.id;
+        return {
+          technicalService: best,
+          wasAutoReassigned: reassigned,
+          reason: reassigned
+            ? `Ruta más económica seleccionada en Plan Free: #${best.providerServiceId} ($${best.rateUSD} USD/1k)`
+            : undefined,
+        };
+      }
+    }
+
+    // En Plan PREMIUM, si el actual sigue válido y tiene refill, usarlo; si no, buscar sustituto con refill
+    if (effectiveTier === 'PREMIUM') {
+      if (currentTech && isCompatible(currentTech)) {
+        return { technicalService: currentTech, wasAutoReassigned: false };
+      }
+      if (candidates.length > 0) {
+        const best = candidates[0];
+        return {
+          technicalService: best,
+          wasAutoReassigned: true,
+          reason: `Reemplazo automático con reposición (refill): #${best.providerServiceId} ($${best.rateUSD} USD/1k)`,
+        };
+      }
+    }
+
+    // Fallback final: si el técnico actual todavía existe aunque no cumpla maxAllowedCost, devolverlo si no está excluido
+    if (currentTech && currentTech.available && !excluded.has(currentTech.id) && !excluded.has(currentTech.providerServiceId)) {
+      return { technicalService: currentTech, wasAutoReassigned: false };
+    }
+
+    return { technicalService: null, wasAutoReassigned: false };
   }
 
   // -------------------------------------------------------------
@@ -511,9 +622,8 @@ export class CatalogService {
       list = list.filter(s => s.commercialName.toLowerCase().includes(q) || s.description.toLowerCase().includes(q));
     }
 
-    // Actualizar precio en vivo según tasa de cambio actual
     return list.map(s => {
-      const calc = pricingEngine.calculate(s.originalRateUSD, 1000, s.id, s.commercialCategory);
+      const calc = pricingEngine.calculate(s.originalRateUSD, 1000, s.id, s.commercialCategory, 'FLOW', s.tier);
       return {
         ...s,
         commercialRateCLP: calc.unitPricePer1000CLP,
@@ -524,7 +634,7 @@ export class CatalogService {
   public getCommercialServiceById(id: string): CommercialCatalogService | undefined {
     const s = this.commercialServices.get(id);
     if (!s) return undefined;
-    const calc = pricingEngine.calculate(s.originalRateUSD, 1000, s.id, s.commercialCategory);
+    const calc = pricingEngine.calculate(s.originalRateUSD, 1000, s.id, s.commercialCategory, 'FLOW', s.tier);
     return {
       ...s,
       commercialRateCLP: calc.unitPricePer1000CLP,
@@ -535,7 +645,6 @@ export class CatalogService {
     const s = this.commercialServices.get(id);
     if (!s) return null;
 
-    // Si cambia el servicio técnico asignado
     if (updates.technicalServiceId && updates.technicalServiceId !== s.technicalServiceId) {
       const newTech = this.technicalServices.get(updates.technicalServiceId);
       if (newTech) {
@@ -543,15 +652,19 @@ export class CatalogService {
         updates.originalRateUSD = newTech.rateUSD;
         updates.minQuantity = newTech.minQuantity;
         updates.maxQuantity = newTech.maxQuantity;
-        updates.refill = newTech.refill;
+        updates.refill = s.tier === 'PREMIUM' ? newTech.refill : false;
         updates.manualProviderSelection = true;
       }
+    }
+
+    if (updates.commercialRateCLP !== undefined && !isNaN(Number(updates.commercialRateCLP))) {
+      updates.commercialRateCLP = pricingEngine.roundTo990CLP(Number(updates.commercialRateCLP));
     }
 
     const updated = {
       ...s,
       ...updates,
-      id: s.id, // Inmutable
+      id: s.id,
       updatedAt: new Date().toISOString(),
     };
 
@@ -589,9 +702,6 @@ export class CatalogService {
     return this.technicalServices.get(id);
   }
 
-  /**
-   * Comparador Inteligente: Encuentra alternativas técnicas equivalentes para un servicio comercial dado
-   */
   public getEquivalentAlternatives(commercialServiceId: string): ProviderTechnicalService[] {
     const comm = this.commercialServices.get(commercialServiceId);
     if (!comm) return [];
@@ -619,8 +729,7 @@ export class CatalogService {
       totalCommercial: commAll.length,
       publishedCommercial: commAll.filter(c => c.published).length,
       tiers: {
-        economico: commAll.filter(c => c.tier === 'ECONOMICO').length,
-        estandar: commAll.filter(c => c.tier === 'ESTANDAR').length,
+        free: commAll.filter(c => c.tier === 'FREE').length,
         premium: commAll.filter(c => c.tier === 'PREMIUM').length,
       },
       lastSyncTime: this.lastSyncTime,

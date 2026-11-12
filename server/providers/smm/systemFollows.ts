@@ -12,50 +12,87 @@ import {
 } from './types.ts';
 
 // Catálogo base de referencia oficial SystemFollows para arranque inmediato
+// Incluye rutas económicas (Plan Free, sin reposición) y rutas de alta retención (Plan Premium, con reposición)
 const SEED_SERVICES: SMMRawService[] = [
   // INSTAGRAM
+  {
+    service: 100,
+    name: "Instagram Seguidores Económicos [Entrega Rápida] [Sin Reposición]",
+    type: "Default",
+    category: "Instagram - Seguidores",
+    rate: 0.75, // ~$712 CLP por 1.000
+    min: 50,
+    max: 100000,
+    refill: false,
+    cancel: false,
+    desc: "Seguidores rápidos de bajo costo. Opción económica sin garantía de reposición."
+  },
   {
     service: 101,
     name: "Instagram Seguidores Latinos / Chile [Garantizados 30 Días] [HQ - Perfiles Reales]",
     type: "Default",
     category: "Instagram - Seguidores",
-    rate: 1.85, // USD por 1000
+    rate: 1.85, // ~$1.758 CLP por 1.000
     min: 50,
     max: 50000,
     refill: true,
     cancel: true,
-    desc: "Seguidores de alta retención para cuentas personales y marcas. Perfiles con publicaciones e historias. Inicio en 0-15 minutos."
+    desc: "Seguidores de alta retención con reposición garantizada 30 días. Perfiles con publicaciones e historias."
+  },
+  {
+    service: 105,
+    name: "Instagram Likes Económicos [Entrega Rápida]",
+    type: "Default",
+    category: "Instagram - Likes",
+    rate: 0.28, // ~$266 CLP por 1.000
+    min: 20,
+    max: 100000,
+    refill: false,
+    cancel: false,
+    desc: "Likes rápidos de bajo costo para publicaciones y Reels."
   },
   {
     service: 102,
-    name: "Instagram Likes Reales [Super Rápidos] [Graduales] [HQ]",
+    name: "Instagram Likes Reales [Super Rápidos] [Con Reposición 30d] [HQ]",
     type: "Default",
     category: "Instagram - Likes",
-    rate: 0.65,
+    rate: 0.85,
     min: 20,
     max: 100000,
     refill: true,
     cancel: true,
-    desc: "Likes de perfiles activos para publicaciones, carruseles y reels. Ayuda al algoritmo a posicionar tu contenido en Explorar."
+    desc: "Likes estables de perfiles activos con garantía de reposición por 30 días."
   },
   {
     service: 103,
-    name: "Instagram Reproducciones de Reels [Alta Retención] [Impulso Viral]",
+    name: "Instagram Reproducciones de Reels [Económicas] [Impulso Viral]",
     type: "Default",
     category: "Instagram - Reels",
-    rate: 0.25,
+    rate: 0.18,
     min: 100,
     max: 1000000,
     refill: false,
     cancel: true,
-    desc: "Visualizaciones de alta retención para Reels. Mejora el alcance orgánico inmediato en la pestaña de Reels."
+    desc: "Visualizaciones rápidas para Reels al menor costo."
+  },
+  {
+    service: 106,
+    name: "Instagram Reproducciones de Reels [Alta Retención + Reposición]",
+    type: "Default",
+    category: "Instagram - Reels",
+    rate: 0.95,
+    min: 100,
+    max: 1000000,
+    refill: true,
+    cancel: true,
+    desc: "Visualizaciones de alta retención para Reels con garantía de reposición."
   },
   {
     service: 104,
     name: "Instagram Comentarios Personalizados en Español [Perfiles Reales]",
     type: "Custom Comments",
     category: "Instagram - Comentarios",
-    rate: 8.50,
+    rate: 5.50,
     min: 5,
     max: 1000,
     refill: true,
@@ -65,8 +102,20 @@ const SEED_SERVICES: SMMRawService[] = [
 
   // TIKTOK
   {
+    service: 200,
+    name: "TikTok Seguidores Económicos [Entrega Rápida] [Sin Reposición]",
+    type: "Default",
+    category: "TikTok - Seguidores",
+    rate: 0.90, // ~$855 CLP por 1.000
+    min: 50,
+    max: 100000,
+    refill: false,
+    cancel: false,
+    desc: "Seguidores TikTok de entrada económica y rápida."
+  },
+  {
     service: 201,
-    name: "TikTok Seguidores [Reales / Sin Caída] [30 Días Garantía]",
+    name: "TikTok Seguidores [Reales / Baja Caída] [30 Días Reposición]",
     type: "Default",
     category: "TikTok - Seguidores",
     rate: 2.40,
@@ -74,75 +123,73 @@ const SEED_SERVICES: SMMRawService[] = [
     max: 100000,
     refill: true,
     cancel: true,
-    desc: "Aumenta seguidores en TikTok para habilitar directos LIVE (1.000+) y enlace en bio. Entrega natural y segura."
+    desc: "Seguidores estables en TikTok con reposición por 30 días para habilitar LIVE y enlace en bio."
+  },
+  {
+    service: 204,
+    name: "TikTok Likes Económicos [Entrega Instantánea]",
+    type: "Default",
+    category: "TikTok - Likes",
+    rate: 0.35,
+    min: 50,
+    max: 50000,
+    refill: false,
+    cancel: false,
+    desc: "Me gusta económicos y rápidos para videos TikTok."
   },
   {
     service: 202,
-    name: "TikTok Likes [Instantáneos / HQ] [Algoritmo Para Ti]",
+    name: "TikTok Likes [Alta Retención / HQ] [30 Días Reposición]",
     type: "Default",
     category: "TikTok - Likes",
-    rate: 0.95,
+    rate: 1.15,
     min: 50,
     max: 50000,
     refill: true,
     cancel: true,
-    desc: "Me gusta de alta velocidad para activar el feed Para Ti (FYP). Sin riesgo de shadowban."
+    desc: "Me gusta de alta calidad y baja caída con garantía de reposición."
   },
   {
     service: 203,
-    name: "TikTok Visualizaciones [Alta Retención 90%+] [Entrega Ultra Rápida]",
+    name: "TikTok Visualizaciones [Ultra Económicas] [Entrega Rápida]",
     type: "Default",
     category: "TikTok - Vistas",
-    rate: 0.15,
+    rate: 0.12,
     min: 500,
     max: 10000000,
     refill: false,
     cancel: true,
-    desc: "Vistas completas para videos. Máxima velocidad para disparar métricas de interacción."
-  },
-
-  // YOUTUBE
-  {
-    service: 301,
-    name: "YouTube Suscriptores [Permanentes] [Aptos Monetización]",
-    type: "Default",
-    category: "YouTube - Suscriptores",
-    rate: 14.50,
-    min: 50,
-    max: 20000,
-    refill: true,
-    cancel: true,
-    desc: "Suscriptores seguros y estables. Ideales para alcanzar los 1.000 suscriptores requeridos para monetizar con AdSense."
+    desc: "Vistas para videos TikTok al menor costo mayorista."
   },
   {
-    service: 302,
-    name: "YouTube Vistas [Monetizables / Sugeridos & Búsqueda Google]",
+    service: 205,
+    name: "TikTok Visualizaciones [Alta Retención 90%+] [Con Reposición]",
     type: "Default",
-    category: "YouTube - Vistas",
-    rate: 2.10,
+    category: "TikTok - Vistas",
+    rate: 0.75,
     min: 500,
-    max: 1000000,
+    max: 5000000,
     refill: true,
     cancel: true,
-    desc: "Reproducciones con retención de 3 a 5 minutos provenientes de fuentes externas y videos sugeridos."
-  },
-  {
-    service: 303,
-    name: "YouTube Likes para Videos [100% Sin Caídas]",
-    type: "Default",
-    category: "YouTube - Likes",
-    rate: 1.80,
-    min: 25,
-    max: 50000,
-    refill: true,
-    cancel: true,
-    desc: "Likes de calidad para optimizar el ranking de búsqueda en YouTube."
+    desc: "Vistas con retención extendida y reposición garantizada."
   },
 
   // FACEBOOK
   {
+    service: 400,
+    name: "Facebook Seguidores de Página Económicos [Sin Reposición]",
+    type: "Default",
+    category: "Facebook - Páginas",
+    rate: 0.95,
+    min: 50,
+    max: 50000,
+    refill: false,
+    cancel: false,
+    desc: "Seguidores económicos para páginas de Facebook."
+  },
+  {
     service: 401,
-    name: "Facebook Seguidores & Likes de Página [Fans Hispanos]",
+    name: "Facebook Seguidores & Likes de Página [Estables + 30d Reposición]",
     type: "Default",
     category: "Facebook - Páginas",
     rate: 3.20,
@@ -150,13 +197,87 @@ const SEED_SERVICES: SMMRawService[] = [
     max: 50000,
     refill: true,
     cancel: true,
-    desc: "Seguidores de página de fans de alta calidad para empresas, creadores y marcas personales."
+    desc: "Seguidores estables de página de fans con garantía de reposición 30 días."
+  },
+
+  // YOUTUBE
+  {
+    service: 300,
+    name: "YouTube Suscriptores Económicos [Entrega Gradual]",
+    type: "Default",
+    category: "YouTube - Suscriptores",
+    rate: 6.20, // ~$5.890 CLP por 1.000
+    min: 50,
+    max: 10000,
+    refill: false,
+    cancel: false,
+    desc: "Suscriptores de canal YouTube en modalidad económica."
+  },
+  {
+    service: 301,
+    name: "YouTube Suscriptores [Permanentes + 30 Días Reposición]",
+    type: "Default",
+    category: "YouTube - Suscriptores",
+    rate: 14.50,
+    min: 50,
+    max: 20000,
+    refill: true,
+    cancel: true,
+    desc: "Suscriptores seguros y estables con reposición por 30 días."
+  },
+  {
+    service: 304,
+    name: "YouTube Vistas Económicas [Entrega Rápida]",
+    type: "Default",
+    category: "YouTube - Vistas",
+    rate: 0.90,
+    min: 500,
+    max: 1000000,
+    refill: false,
+    cancel: false,
+    desc: "Reproducciones rápidas para videos de YouTube."
+  },
+  {
+    service: 302,
+    name: "YouTube Vistas [Sugeridos + 30 Días Reposición]",
+    type: "Default",
+    category: "YouTube - Vistas",
+    rate: 2.10,
+    min: 500,
+    max: 1000000,
+    refill: true,
+    cancel: true,
+    desc: "Reproducciones de alta retención con reposición por 30 días."
+  },
+  {
+    service: 303,
+    name: "YouTube Likes para Videos [30 Días Reposición]",
+    type: "Default",
+    category: "YouTube - Likes",
+    rate: 1.80,
+    min: 25,
+    max: 50000,
+    refill: true,
+    cancel: true,
+    desc: "Likes estables para optimizar el ranking de videos en YouTube."
   },
 
   // X (TWITTER)
   {
+    service: 500,
+    name: "X (Twitter) Seguidores Económicos [Entrega Rápida]",
+    type: "Default",
+    category: "X / Twitter - Seguidores",
+    rate: 1.90,
+    min: 50,
+    max: 30000,
+    refill: false,
+    cancel: false,
+    desc: "Seguidores rápidos en X al menor costo."
+  },
+  {
     service: 501,
-    name: "X (Twitter) Seguidores [Perfiles con Avatar y Bio]",
+    name: "X (Twitter) Seguidores [Perfiles Activos + 30d Reposición]",
     type: "Default",
     category: "X / Twitter - Seguidores",
     rate: 4.80,
@@ -164,13 +285,13 @@ const SEED_SERVICES: SMMRawService[] = [
     max: 30000,
     refill: true,
     cancel: true,
-    desc: "Seguidores globales y de habla hispana con perfiles activos. Entrega gradual segura."
+    desc: "Seguidores con avatar, bio y reposición garantizada."
   },
 
   // SPOTIFY
   {
     service: 601,
-    name: "Spotify Oyentes Mensuales [Tráfico Algorítmico]",
+    name: "Spotify Oyentes Mensuales [Con Reposición]",
     type: "Default",
     category: "Spotify - Oyentes",
     rate: 2.90,
@@ -178,13 +299,25 @@ const SEED_SERVICES: SMMRawService[] = [
     max: 500000,
     refill: true,
     cancel: true,
-    desc: "Incrementa los oyentes mensuales de tu perfil de artista. Válido para algoritmos Discover Weekly y Release Radar."
+    desc: "Incrementa los oyentes mensuales de tu perfil de artista con garantía."
   },
 
   // TELEGRAM
   {
+    service: 700,
+    name: "Telegram Miembros de Canal Económicos",
+    type: "Default",
+    category: "Telegram - Miembros",
+    rate: 0.70,
+    min: 100,
+    max: 100000,
+    refill: false,
+    cancel: false,
+    desc: "Miembros de entrada rápida y económica para canales de Telegram."
+  },
+  {
     service: 701,
-    name: "Telegram Miembros de Canal / Grupo [0% Caída - 30 Días Refill]",
+    name: "Telegram Miembros de Canal / Grupo [Baja Caída + 30 Días Reposición]",
     type: "Default",
     category: "Telegram - Miembros",
     rate: 1.95,
@@ -192,7 +325,7 @@ const SEED_SERVICES: SMMRawService[] = [
     max: 100000,
     refill: true,
     cancel: true,
-    desc: "Miembros para canales públicos o privados de Telegram. Aumenta la credibilidad de tu comunidad."
+    desc: "Miembros estables con garantía de reposición 30 días."
   }
 ];
 

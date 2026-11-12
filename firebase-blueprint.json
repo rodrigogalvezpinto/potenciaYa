@@ -104,13 +104,13 @@
     },
     "Payment": {
       "title": "Payment",
-      "description": "Transacción de pago con Webpay o Mercado Pago",
+      "description": "Transacción de pago confirmada con Flow Chile",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
         "orderId": { "type": "string", "maxLength": 128 },
         "userId": { "type": "string", "maxLength": 128 },
-        "gateway": { "type": "string", "enum": ["WEBPAY_PLUS", "MERCADO_PAGO"] },
+        "gateway": { "type": "string", "enum": ["FLOW"] },
         "amount": { "type": "number" },
         "currency": { "type": "string", "enum": ["CLP"] },
         "status": {

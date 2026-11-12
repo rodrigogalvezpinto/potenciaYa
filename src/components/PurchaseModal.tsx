@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { CommercialService } from '../types/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 import { formatCLP } from '../utils/currency.ts';
+import { TERMS_FINE_PRINT_PARAGRAPHS, TERMS_FINE_PRINT_TITLE } from '../constants/terms.ts';
 import { 
   X, 
   ShieldCheck, 
@@ -26,7 +27,8 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
   const [quantity, setQuantity] = useState<number>(1000);
   const [targetUrl, setTargetUrl] = useState<string>('');
   const [guestEmail, setGuestEmail] = useState<string>('');
-  const [gateway, setGateway] = useState<'WEBPAY_PLUS' | 'MERCADO_PAGO'>('WEBPAY_PLUS');
+  const [showTerms, setShowTerms] = useState<boolean>(false);
+  const gateway = 'FLOW' as const;
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [quote, setQuote] = useState<{
@@ -67,10 +69,11 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
           });
         }
       } catch {
-        // Fallback local client-side calculation
+        // Fallback local client-side calculation (siempre terminado en .990 CLP)
         const base = (service.commercialRateCLP / 1000) * quantity;
+        const rounded990 = Math.max(2990, Math.round((Math.round(base) + 10) / 1000) * 1000 - 10);
         setQuote({
-          totalPriceCLP: Math.ceil(base / 10) * 10,
+          totalPriceCLP: rounded990,
           unitPricePer1000CLP: service.commercialRateCLP,
         });
       }
@@ -155,12 +158,8 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
 
       const orderId = draftData.order.id;
 
-      // 2. Iniciar pasarela de pago seleccionada
-      const endpoint = gateway === 'WEBPAY_PLUS'
-        ? '/api/payments/webpay/create'
-        : '/api/payments/mercadopago/create';
-
-      const payRes = await fetch(endpoint, {
+      // 2. Iniciar pago seguro en Flow.cl
+      const payRes = await fetch('/api/payments/flow/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderId }),
@@ -168,7 +167,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
 
       const payData = await payRes.json();
       if (!payData.success || !payData.payment) {
-        throw new Error(payData.error || 'Error al iniciar la pasarela de pago.');
+        throw new Error(payData.error || 'Error al iniciar la pasarela Flow.');
       }
 
       // Guardar en pedidos locales para seguimiento inmediato
@@ -178,24 +177,19 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
         localStorage.setItem('potenciaredes_recent_orders', JSON.stringify(updated));
       } catch {}
 
-      // Si la pasarela devuelve formulario directo Webpay.cl (Empresa 186612 / Formulario 436254)
-      if (payData.payment.portalForm) {
+      // Flow.cl REST API v3: Redirección segura en nueva pestaña (evita bloqueos X-Frame-Options dentro de iframe)
+      if (payData.payment.url && payData.payment.token) {
         const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = payData.payment.portalForm.action;
+        form.method = 'GET';
+        form.action = payData.payment.url;
         form.target = '_blank';
+        form.rel = 'noopener noreferrer';
 
-        const inputId = document.createElement('input');
-        inputId.type = 'hidden';
-        inputId.name = 'idFormulario';
-        inputId.value = String(payData.payment.portalForm.idFormulario);
-        form.appendChild(inputId);
-
-        const inputMonto = document.createElement('input');
-        inputMonto.type = 'hidden';
-        inputMonto.name = 'monto';
-        inputMonto.value = String(payData.payment.portalForm.monto);
-        form.appendChild(inputMonto);
+        const inputToken = document.createElement('input');
+        inputToken.type = 'hidden';
+        inputToken.name = 'token';
+        inputToken.value = payData.payment.token;
+        form.appendChild(inputToken);
 
         document.body.appendChild(form);
         form.submit();
@@ -205,24 +199,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
         return;
       }
 
-      // Webpay Plus Oficial REST API: Monto 100% fijo y bloqueado por Transbank
-      if (payData.payment.url && payData.payment.token) {
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = payData.payment.url;
-
-        const inputToken = document.createElement('input');
-        inputToken.type = 'hidden';
-        inputToken.name = 'token_ws';
-        inputToken.value = payData.payment.token;
-        form.appendChild(inputToken);
-
-        document.body.appendChild(form);
-        form.submit();
-        return;
-      }
-
-      // 3. Redirigir al flujo de retorno / pago seguro estándar
+      // Fallback si solo viene redirectUrl
       if (payData.payment.redirectUrl) {
         window.location.href = payData.payment.redirectUrl;
       } else {
@@ -258,11 +235,9 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
               <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${
                 service.tier === 'PREMIUM'
                   ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30'
-                  : service.tier === 'ESTANDAR'
-                  ? 'bg-sky-500/10 text-sky-300 border border-sky-500/30'
                   : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
               }`}>
-                Modalidad {service.tier}
+                {service.tier === 'PREMIUM' ? 'Plan Premium (Alta Estabilidad)' : 'Plan Free'}
               </span>
             )}
           </div>
@@ -361,60 +336,19 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
             </div>
           )}
 
-          {/* Medio de Pago */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-2">
-              Selecciona tu medio de pago en Chile
-            </label>
-            <div className="grid grid-cols-2 gap-2.5">
-              
-              {/* Webpay Plus */}
-              <button
-                type="button"
-                onClick={() => setGateway('WEBPAY_PLUS')}
-                className={`flex flex-col items-start p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                  gateway === 'WEBPAY_PLUS'
-                    ? 'border-orange-500 bg-orange-500/10 text-white'
-                    : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center justify-between w-full mb-1">
-                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span>💳</span> Webpay Plus
-                  </span>
-                  {gateway === 'WEBPAY_PLUS' && (
-                    <span className="w-2 h-2 rounded-full bg-orange-400"></span>
-                  )}
-                </div>
-                <span className="text-[10px] text-slate-400 leading-tight">
-                  Redcompra, Débito y Crédito bancario en CLP
-                </span>
-              </button>
-
-              {/* Mercado Pago */}
-              <button
-                type="button"
-                onClick={() => setGateway('MERCADO_PAGO')}
-                className={`flex flex-col items-start p-3 rounded-xl border text-left transition-all cursor-pointer ${
-                  gateway === 'MERCADO_PAGO'
-                    ? 'border-sky-500 bg-sky-500/10 text-white'
-                    : 'border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center justify-between w-full mb-1">
-                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span>⚡</span> Mercado Pago
-                  </span>
-                  {gateway === 'MERCADO_PAGO' && (
-                    <span className="w-2 h-2 rounded-full bg-sky-400"></span>
-                  )}
-                </div>
-                <span className="text-[10px] text-slate-400 leading-tight">
-                  Tarjetas y Dinero en cuenta Mercado Pago
-                </span>
-              </button>
-
+          {/* Pasarela de Pago Única: Flow Chile */}
+          <div className="p-3.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-left">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                <span>🇨🇱</span> Flow Chile — Pago Seguro en CLP
+              </span>
+              <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-black uppercase">
+                Confirmación Automática
+              </span>
             </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              Paga con Webpay, Redcompra, tarjetas de débito/crédito, Servipag, MACH u Onepay. El monto queda bloqueado y Flow confirma tu pago en tiempo real antes de despachar.
+            </p>
           </div>
 
           {/* Resumen de Compra en CLP */}
@@ -427,10 +361,10 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
             </div>
 
             <div className="flex justify-between text-xs text-slate-400">
-              <span>Garantía de reposición:</span>
+              <span>Modalidad del servicio:</span>
               <span className="font-semibold text-emerald-400 flex items-center gap-1">
-                <RotateCcw className="w-3 h-3" />
-                {service.refill ? '30 Días Refill Incluido' : 'Garantía de Entrega'}
+                <Zap className="w-3 h-3" />
+                {service.tier === 'PREMIUM' ? 'Plan Premium • Alta Estabilidad' : 'Plan Free • Entrega Rápida'}
               </span>
             </div>
 
@@ -459,16 +393,48 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
             ) : (
               <>
                 <Lock className="w-4 h-4" />
-                <span>Pagar Seguro con {gateway === 'WEBPAY_PLUS' ? 'Webpay' : 'Mercado Pago'}</span>
+                <span>Pagar Seguro con Flow Chile</span>
               </>
             )}
           </button>
 
-          {/* Garantía de Seguridad */}
-          <p className="text-center text-[11px] text-slate-500 flex items-center justify-center gap-1">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Transacción encriptada con estándar bancario PCI-DSS</span>
-          </p>
+          {/* Garantía de Seguridad y Letra Chica Oculta en Términos y Condiciones */}
+          <div className="space-y-2 pt-0.5">
+            <p className="text-center text-[11px] text-slate-500 flex items-center justify-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Transacción encriptada con estándar bancario PCI-DSS</span>
+            </p>
+
+            <p className="text-center text-[10px] text-slate-500">
+              Al continuar con tu compra aceptas nuestros{' '}
+              <button
+                type="button"
+                onClick={() => setShowTerms(prev => !prev)}
+                className="underline text-slate-400 hover:text-slate-200 cursor-pointer"
+              >
+                Términos y Condiciones
+              </button>
+              .
+            </p>
+
+            {showTerms && (
+              <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 text-[10px] leading-relaxed text-slate-400 space-y-1.5 text-left">
+                <div className="flex items-center justify-between text-slate-300 font-semibold">
+                  <span>{TERMS_FINE_PRINT_TITLE}</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowTerms(false)}
+                    className="text-slate-500 hover:text-white cursor-pointer"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+                {TERMS_FINE_PRINT_PARAGRAPHS.map((paragraph, index) => (
+                  <p key={index}>{paragraph}</p>
+                ))}
+              </div>
+            )}
+          </div>
 
         </form>
 

@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import confetti from 'canvas-confetti';
 import { formatCLP } from '../utils/currency.ts';
 import { CommercialOrder } from '../types/index.ts';
-import { CheckCircle2, AlertTriangle, ArrowRight, ShoppingBag, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, ShoppingBag, ShieldCheck, RefreshCw, Clock } from 'lucide-react';
 
 interface PaymentReturnPageProps {
   onGoToOrders: () => void;
@@ -12,67 +12,56 @@ interface PaymentReturnPageProps {
 export const PaymentReturnPage: React.FC<PaymentReturnPageProps> = ({ onGoToOrders, onGoToStore }) => {
   const [loading, setLoading] = useState(true);
   const [approved, setApproved] = useState(false);
+  const [pending, setPending] = useState(false);
   const [order, setOrder] = useState<CommercialOrder | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    const processReturn = async () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const pathname = window.location.pathname;
+  const processReturn = useCallback(async () => {
+    setLoading(true);
+    setPending(false);
+    setErrorMessage(null);
 
-      const isWebpay = pathname.includes('webpay-return') || urlParams.has('token_ws');
-      const token = urlParams.get('token_ws') || urlParams.get('token');
-      const orderId = urlParams.get('orderId') || urlParams.get('mock_order') || urlParams.get('external_reference');
-      const prefId = urlParams.get('preference_id');
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    const orderId = urlParams.get('orderId');
 
-      try {
-        if (isWebpay) {
-          const res = await fetch('/api/payments/webpay/commit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: token || 'TBK-MOCK-SANDBOX', orderId }),
-          });
-          const data = await res.json();
-          if (data.success && data.status === 'APPROVED') {
-            setApproved(true);
-            setOrder(data.order);
-            // Disparar celebración
-            try {
-              confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-            } catch {}
-          } else {
-            setApproved(false);
-            setErrorMessage(data.message || 'La transacción no fue aprobada por el emisor bancario.');
-          }
-        } else {
-          // Mercado Pago
-          const res = await fetch('/api/payments/mercadopago/confirm', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ orderId, preferenceId: prefId }),
-          });
-          const data = await res.json();
-          if (data.success && data.status === 'APPROVED') {
-            setApproved(true);
-            setOrder(data.order);
-            try {
-              confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-            } catch {}
-          } else {
-            setApproved(false);
-            setErrorMessage(data.message || 'El pago no ha sido confirmado.');
-          }
-        }
-      } catch (err: any) {
+    try {
+      const res = await fetch('/api/payments/flow/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, orderId }),
+      });
+      const data = await res.json();
+      if (data.success && data.status === 'APPROVED') {
+        setApproved(true);
+        setPending(false);
+        setOrder(data.order);
+        try {
+          confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+        } catch {}
+      } else if (data.status === 'PENDING') {
         setApproved(false);
-        setErrorMessage(err.message || 'Error al validar el pago con la pasarela.');
-      } finally {
-        setLoading(false);
+        setPending(true);
+        if (data.order) setOrder(data.order);
+        setErrorMessage(
+          data.message || 'El pago aún está pendiente de confirmación en Flow. Puedes reintentar en unos segundos.'
+        );
+      } else {
+        setApproved(false);
+        setPending(false);
+        setErrorMessage(data.message || data.error || 'El pago en Flow no fue aprobado o fue cancelado.');
       }
-    };
-
-    processReturn();
+    } catch (err: any) {
+      setApproved(false);
+      setErrorMessage(err.message || 'Error al validar el pago con Flow.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    processReturn();
+  }, [processReturn]);
 
   return (
     <div className="py-16 sm:py-24 max-w-lg mx-auto px-4 text-center">
@@ -142,9 +131,36 @@ export const PaymentReturnPage: React.FC<PaymentReturnPageProps> = ({ onGoToOrde
 
           <div className="mt-6 flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Comprobante emitido con validez tributaria nacional</span>
+            <span>Comprobante emitido con verificación automática en CLP</span>
           </div>
 
+        </div>
+      ) : pending ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 sm:p-10 shadow-2xl text-slate-100">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-5">
+            <Clock className="w-9 h-9 stroke-[2.2]" />
+          </div>
+
+          <h2 className="text-2xl font-black text-white">Pago Pendiente en Flow</h2>
+          <p className="text-xs sm:text-sm text-slate-300 mt-2">
+            {errorMessage}
+          </p>
+
+          <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
+            <button
+              onClick={processReturn}
+              className="py-3 px-5 bg-gradient-to-r from-orange-500 to-rose-600 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg cursor-pointer inline-flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Reintentar Verificación</span>
+            </button>
+            <button
+              onClick={onGoToOrders}
+              className="py-3 px-5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs sm:text-sm rounded-xl cursor-pointer"
+            >
+              Ir a Mis Pedidos
+            </button>
+          </div>
         </div>
       ) : (
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 sm:p-10 shadow-2xl text-slate-100">
@@ -158,6 +174,12 @@ export const PaymentReturnPage: React.FC<PaymentReturnPageProps> = ({ onGoToOrde
           </p>
 
           <div className="mt-8 flex gap-3 justify-center">
+            <button
+              onClick={onGoToOrders}
+              className="py-3 px-5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs sm:text-sm rounded-xl cursor-pointer"
+            >
+              Ver Mis Pedidos
+            </button>
             <button
               onClick={onGoToStore}
               className="py-3 px-6 bg-gradient-to-r from-orange-500 to-rose-600 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg cursor-pointer"

@@ -20,7 +20,7 @@ export const HowItWorks: React.FC = () => {
     {
       num: '03',
       title: 'Paga Seguro en Pesos Chilenos',
-      desc: 'Realiza el pago con Transbank Webpay Plus (Redcompra / Crédito) o Mercado Pago con confirmación bancaria al instante.',
+      desc: 'Realiza el pago a través de Flow Chile (tarjetas de débito/crédito, Redcompra, Servipag, MACH u Onepay) con monto bloqueado y confirmación automática.',
       icon: CreditCard,
       color: 'from-rose-600 to-rose-700',
     },

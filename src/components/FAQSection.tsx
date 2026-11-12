@@ -10,16 +10,16 @@ export const FAQSection: React.FC = () => {
       a: 'Nuestros servicios operan mediante métodos no intrusivos y de alta retención que respetan los límites de entrega de las plataformas. Además, jamás solicitamos tu contraseña ni acceso a tu cuenta, por lo que tu perfil se mantiene 100% seguro.',
     },
     {
-      q: '¿Qué es la garantía de Refill y cómo funciona?',
-      a: 'El "Refill" es una garantía de reposición. Si por alguna actualización de la red social la cantidad de seguidores o likes disminuye durante los 30 días posteriores a tu compra, puedes presionar el botón "Solicitar Refill" desde tu panel y el sistema repondrá las unidades faltantes sin costo adicional.',
+      q: '¿Qué diferencia hay entre el Plan Free y el Plan Premium?',
+      a: 'El Plan Free utiliza la ruta más económica disponible para impulsar tu cuenta con entrega rápida, mientras que el Plan Premium selecciona rutas de mayor calidad, estabilidad y retención estimada.',
     },
     {
       q: '¿Cuánto demora en iniciar y completarse un pedido?',
-      a: 'La gran mayoría de los servicios inician entre 5 y 15 minutos después de confirmado el pago con Webpay o Mercado Pago. El tiempo de finalización depende de la cantidad solicitada para mantener una entrega natural y progresiva.',
+      a: 'La gran mayoría de los servicios inician entre 5 y 15 minutos después de que Flow confirma el pago. El tiempo de finalización depende de la cantidad solicitada para mantener una entrega natural y progresiva.',
     },
     {
       q: '¿Qué medios de pago aceptan en Chile?',
-      a: 'Aceptamos pagos directos en Pesos Chilenos (CLP) a través de Transbank Webpay Plus (Redcompra, tarjetas de débito y crédito) y Mercado Pago (tarjetas y saldo en cuenta). No hay comisiones sorpresa por conversión de divisas.',
+      a: 'Procesamos todos nuestros cobros con monto exacto en Pesos Chilenos (CLP) exclusivamente a través de Flow Chile, lo que te permite pagar con tarjetas de débito y crédito (Redcompra/Webpay), Servipag, MACH, Onepay y transferencias bancarias sin comisiones ocultas.',
     },
     {
       q: '¿Mi cuenta debe ser pública al momento de la entrega?',

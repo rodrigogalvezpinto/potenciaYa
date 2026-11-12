@@ -78,13 +78,25 @@ export const AdminDashboard: React.FC = () => {
   const [selectedCommForCompare, setSelectedCommForCompare] = useState<string>('');
   const [compareData, setCompareData] = useState<{ commercial?: CommercialCatalogService; equivalents: ProviderTechnicalService[] } | null>(null);
 
-  // Ajustes de umbrales y FX
+  // Ajustes de umbrales, precios base y FX
   const [newFxRate, setNewFxRate] = useState<string>('950');
   const [newMargin, setNewMargin] = useState<string>('80');
+  const [newFreeBaseCLP, setNewFreeBaseCLP] = useState<string>('7990');
+  const [newFreeMicroCLP, setNewFreeMicroCLP] = useState<string>('5990');
+  const [newPremiumBaseCLP, setNewPremiumBaseCLP] = useState<string>('14990');
   const [newApiKey, setNewApiKey] = useState<string>('');
+  const [newFlowEnv, setNewFlowEnv] = useState<'PRODUCTION' | 'SANDBOX'>('PRODUCTION');
+  const [newFlowApiKey, setNewFlowApiKey] = useState<string>('');
+  const [newFlowSecretKey, setNewFlowSecretKey] = useState<string>('');
   const [lowUSD, setLowUSD] = useState<string>('30');
   const [criticalUSD, setCriticalUSD] = useState<string>('10');
   const [insufficientUSD, setInsufficientUSD] = useState<string>('2');
+
+  // Prueba en vivo de Flow
+  const [testingFlow, setTestingFlow] = useState(false);
+  const [flowTestAmount, setFlowTestAmount] = useState<string>('500');
+  const [flowTestEmail, setFlowTestEmail] = useState<string>('rodrigogalvez@42labs.cl');
+  const [flowTestResult, setFlowTestResult] = useState<any>(null);
 
   // Reconciliación modal
   const [reconcileModalOrder, setReconcileModalOrder] = useState<CommercialOrder | null>(null);
@@ -129,6 +141,12 @@ export const AdminDashboard: React.FC = () => {
         setSettings(settingsRes.settings);
         setNewFxRate(String(settingsRes.settings.usdClpRate));
         setNewMargin(String(settingsRes.settings.defaultGlobalMarginPercent));
+        if (settingsRes.settings.freeBasePriceCLP) setNewFreeBaseCLP(String(settingsRes.settings.freeBasePriceCLP));
+        if (settingsRes.settings.freeMicroPriceCLP) setNewFreeMicroCLP(String(settingsRes.settings.freeMicroPriceCLP));
+        if (settingsRes.settings.premiumBasePriceCLP) setNewPremiumBaseCLP(String(settingsRes.settings.premiumBasePriceCLP));
+        if (settingsRes.settings.flowEnvironment === 'SANDBOX' || settingsRes.settings.flowEnvironment === 'PRODUCTION') {
+          setNewFlowEnv(settingsRes.settings.flowEnvironment);
+        }
         if (settingsRes.settings.thresholds) {
           setLowUSD(String(settingsRes.settings.thresholds.lowUSD));
           setCriticalUSD(String(settingsRes.settings.thresholds.criticalUSD));
@@ -216,7 +234,7 @@ export const AdminDashboard: React.FC = () => {
         setCommercialServices(prev => prev.map(s => s.id === serviceId ? { ...s, published: !currentPublished } : s));
       }
     } catch (err: any) {
-      alert(`Error al actualizar: ${err.message}`);
+      setStatusMessage({ type: 'error', text: `Error al actualizar: ${err.message}` });
     }
   };
 
@@ -338,7 +356,13 @@ export const AdminDashboard: React.FC = () => {
         body: JSON.stringify({
           usdClpRate: parseFloat(newFxRate),
           defaultGlobalMarginPercent: parseFloat(newMargin),
+          freeBasePriceCLP: parseFloat(newFreeBaseCLP),
+          freeMicroPriceCLP: parseFloat(newFreeMicroCLP),
+          premiumBasePriceCLP: parseFloat(newPremiumBaseCLP),
           systemFollowsApiKey: newApiKey.trim() || undefined,
+          flowEnvironment: newFlowEnv,
+          flowApiKey: newFlowApiKey.trim() || undefined,
+          flowSecretKey: newFlowSecretKey.trim() || undefined,
           thresholds: {
             lowUSD: parseFloat(lowUSD),
             criticalUSD: parseFloat(criticalUSD),
@@ -348,12 +372,44 @@ export const AdminDashboard: React.FC = () => {
       });
       const data = await res.json();
       if (data.success) {
-        setStatusMessage({ type: 'success', text: 'Configuraciones y umbrales actualizados.' });
+        setStatusMessage({ type: 'success', text: 'Configuraciones, precios base y pasarela Flow actualizados.' });
         setNewApiKey('');
+        setNewFlowApiKey('');
+        setNewFlowSecretKey('');
         await loadAllAdminData();
       }
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleTestFlowConnection = async () => {
+    setTestingFlow(true);
+    setFlowTestResult(null);
+    setStatusMessage(null);
+    try {
+      const res = await fetch('/api/admin/flow/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          testEmail: flowTestEmail.trim(),
+          amountCLP: parseInt(flowTestAmount, 10) || 500,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFlowTestResult(data);
+        setStatusMessage({
+          type: 'success',
+          text: `Flow (${data.environment}) respondió OK. Orden de prueba #${data.flowOrder} lista para probar pago.`,
+        });
+      } else {
+        setStatusMessage({ type: 'error', text: data.error || 'Flow rechazó la prueba de conexión.' });
+      }
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || 'Error al probar Flow.' });
+    } finally {
+      setTestingFlow(false);
     }
   };
 
@@ -665,19 +721,13 @@ export const AdminDashboard: React.FC = () => {
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between p-2 rounded-lg bg-slate-950 border border-slate-800">
                   <span className="text-emerald-400 font-bold flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5" /> Modalidad Económico
+                    <Zap className="w-3.5 h-3.5" /> Plan Free (Ruta Más Barata)
                   </span>
-                  <span className="font-bold text-white">{commercialServices.filter(c => c.tier === 'ECONOMICO').length} servicios</span>
-                </div>
-                <div className="flex justify-between p-2 rounded-lg bg-slate-950 border border-slate-800">
-                  <span className="text-sky-400 font-bold flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5" /> Modalidad Estándar
-                  </span>
-                  <span className="font-bold text-white">{commercialServices.filter(c => c.tier === 'ESTANDAR').length} servicios</span>
+                  <span className="font-bold text-white">{commercialServices.filter(c => c.tier === 'FREE').length} servicios</span>
                 </div>
                 <div className="flex justify-between p-2 rounded-lg bg-slate-950 border border-slate-800">
                   <span className="text-amber-400 font-bold flex items-center gap-1.5">
-                    <Crown className="w-3.5 h-3.5" /> Modalidad Premium (Refill 30d)
+                    <Crown className="w-3.5 h-3.5" /> Plan Premium (Con Reposición 30d)
                   </span>
                   <span className="font-bold text-white">{commercialServices.filter(c => c.tier === 'PREMIUM').length} servicios</span>
                 </div>
@@ -771,7 +821,7 @@ export const AdminDashboard: React.FC = () => {
 
                       <td className="p-3.5">
                         <div className="font-medium text-white truncate max-w-[130px]">{order.userEmail}</div>
-                        <div className="text-[10px] text-slate-500">{order.paymentGateway || 'Webpay'}</div>
+                        <div className="text-[10px] text-slate-500">{order.paymentGateway === 'FLOW' ? 'Flow Chile' : (order.paymentGateway || 'Flow Chile')}</div>
                       </td>
 
                       <td className="p-3.5 max-w-[200px]">
@@ -962,7 +1012,7 @@ export const AdminDashboard: React.FC = () => {
             <div>
               <h3 className="text-base font-bold text-white">Catálogo Comercial de PotenciaRedes (Nivel 2)</h3>
               <p className="text-xs text-slate-400">
-                Determina exactamente lo que visualizan los clientes en la tienda: nombres, modalidades (Económico, Estándar, Premium), publicación y precios en CLP.
+                Determina exactamente lo que visualizan los clientes en la tienda: nombres, planes (Plan Free y Plan Premium con reposición), publicación y precios en CLP.
               </p>
             </div>
 
@@ -988,7 +1038,7 @@ export const AdminDashboard: React.FC = () => {
               <thead className="bg-slate-950 text-slate-400 font-bold uppercase tracking-wider border-b border-slate-800">
                 <tr>
                   <th className="p-3.5">Plataforma</th>
-                  <th className="p-3.5">Modalidad (Tier)</th>
+                  <th className="p-3.5">Plan</th>
                   <th className="p-3.5">Nombre Comercial</th>
                   <th className="p-3.5">Servicio Técnico Asociado</th>
                   <th className="p-3.5 text-right">Costo USD</th>
@@ -1008,8 +1058,6 @@ export const AdminDashboard: React.FC = () => {
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                           s.tier === 'PREMIUM'
                             ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30'
-                            : s.tier === 'ESTANDAR'
-                            ? 'bg-sky-500/10 text-sky-300 border border-sky-500/30'
                             : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
                         }`}>
                           {s.tier}
@@ -1470,6 +1518,39 @@ export const AdminDashboard: React.FC = () => {
                   />
                 </div>
 
+                <div className="pt-2 border-t border-slate-800 space-y-2">
+                  <h4 className="font-bold text-slate-200">Precios Base por Plan (CLP x 1.000)</h4>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[11px] text-slate-400 block mb-1">Free Seguidores</label>
+                      <input
+                        type="number"
+                        value={newFreeBaseCLP}
+                        onChange={(e) => setNewFreeBaseCLP(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-400 block mb-1">Free Likes/Vistas</label>
+                      <input
+                        type="number"
+                        value={newFreeMicroCLP}
+                        onChange={(e) => setNewFreeMicroCLP(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-400 block mb-1">Premium (Reposición)</label>
+                      <input
+                        type="number"
+                        value={newPremiumBaseCLP}
+                        onChange={(e) => setNewPremiumBaseCLP(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <div>
                   <label className="block font-semibold text-slate-300 mb-1">Nueva API Key de SystemFollows</label>
                   <input
@@ -1479,6 +1560,54 @@ export const AdminDashboard: React.FC = () => {
                     placeholder="Dejar vacío para conservar actual"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
                   />
+                </div>
+
+                <div className="pt-2 border-t border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-slate-200">Pasarela Flow.cl (API REST v3)</h4>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      settings?.flowConfigured
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                        : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                    }`}>
+                      {settings?.flowConfigured ? `Activa (${settings?.flowEnvironment || 'PRODUCTION'})` : 'Sin Configurar'}
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Ambiente Flow</label>
+                    <select
+                      value={newFlowEnv}
+                      onChange={(e) => setNewFlowEnv(e.target.value === 'SANDBOX' ? 'SANDBOX' : 'PRODUCTION')}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
+                    >
+                      <option value="PRODUCTION">PRODUCTION (www.flow.cl)</option>
+                      <option value="SANDBOX">SANDBOX (sandbox.flow.cl)</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[11px] text-slate-400 block mb-1">Nueva Flow API Key</label>
+                      <input
+                        type="password"
+                        value={newFlowApiKey}
+                        onChange={(e) => setNewFlowApiKey(e.target.value)}
+                        placeholder="Conservar actual"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-400 block mb-1">Nuevo Flow Secret Key</label>
+                      <input
+                        type="password"
+                        value={newFlowSecretKey}
+                        onChange={(e) => setNewFlowSecretKey(e.target.value)}
+                        placeholder="Conservar actual"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="pt-2 border-t border-slate-800">
@@ -1523,32 +1652,109 @@ export const AdminDashboard: React.FC = () => {
               </form>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-              <h3 className="text-base font-bold text-white mb-2 flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-sky-400" />
-                <span>Historial de Sincronizaciones con Proveedores</span>
-              </h3>
-              <p className="text-xs text-slate-400 mb-4">
-                Registro de eventos de actualización, altas de servicios y detecciones de discontinuidad.
-              </p>
+            <div className="space-y-6">
+              {/* Prueba en Vivo de Integración Flow */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <h3 className="text-base font-bold text-white mb-2 flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                  <span>Probar Pago e Integración Flow.cl</span>
+                </h3>
+                <p className="text-xs text-slate-400 mb-4">
+                  Genera una orden de prueba firmada con Flow ({settings?.flowEnvironment || 'PRODUCTION'}) y verifica al instante creación, firma HMAC-SHA256, <code>getStatus</code> y URLs de confirmación.
+                </p>
 
-              <div className="space-y-2 max-h-80 overflow-y-auto pr-1 text-xs">
-                {syncHistory.map(h => (
-                  <div key={h.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="font-bold text-white">{h.provider}</span>
-                      <span className="text-[11px] text-slate-400">{formatChileanDate(h.timestamp)}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-[11px] text-slate-400">
-                      <span>Total: <strong className="text-white">{h.totalFetched}</strong></span>
-                      <span className="text-emerald-400 font-bold">+{h.newServicesCount} nuevos</span>
-                      <span className="text-amber-400 font-bold">{h.modifiedCount} cambios</span>
-                      {h.missingCount > 0 && (
-                        <span className="text-rose-400 font-bold">{h.missingCount} desaparecidos</span>
-                      )}
-                    </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mb-3">
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Correo de prueba (MX válido)</label>
+                    <input
+                      type="email"
+                      value={flowTestEmail}
+                      onChange={(e) => setFlowTestEmail(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
+                    />
                   </div>
-                ))}
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Monto prueba CLP (mín. $350)</label>
+                    <input
+                      type="number"
+                      min={350}
+                      max={20000}
+                      value={flowTestAmount}
+                      onChange={(e) => setFlowTestAmount(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleTestFlowConnection}
+                  disabled={testingFlow}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl cursor-pointer transition-all"
+                >
+                  {testingFlow ? 'Probando comunicación con Flow...' : 'Probar Conexión y Crear Orden de Prueba Flow'}
+                </button>
+
+                {flowTestResult && (
+                  <div className="mt-4 p-3 rounded-xl bg-slate-950 border border-emerald-500/30 text-[11px] space-y-1.5">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Ambiente / FlowOrder:</span>
+                      <span className="font-mono font-bold text-emerald-400">
+                        {flowTestResult.environment} • #{flowTestResult.flowOrder}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Verificación getStatus:</span>
+                      <span className="font-bold text-white">{flowTestResult.getStatusVerified}</span>
+                    </div>
+                    <div className="text-slate-400 truncate">
+                      <span>Webhook: </span>
+                      <span className="font-mono text-slate-300">{flowTestResult.confirmationUrl}</span>
+                    </div>
+                    {flowTestResult.url && flowTestResult.token && (
+                      <form method="GET" action={flowTestResult.url} target="_blank" rel="noopener noreferrer" className="pt-1.5">
+                        <input type="hidden" name="token" value={flowTestResult.token} />
+                        <button
+                          type="submit"
+                          className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-emerald-300 font-bold rounded-lg cursor-pointer inline-flex items-center justify-center gap-1.5"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Abrir Checkout de Prueba en Flow ({formatCLP(flowTestResult.amountCLP)})</span>
+                        </button>
+                      </form>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Historial de Sincronizaciones */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <h3 className="text-base font-bold text-white mb-2 flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-sky-400" />
+                  <span>Historial de Sincronizaciones con Proveedores</span>
+                </h3>
+                <p className="text-xs text-slate-400 mb-4">
+                  Registro de eventos de actualización, altas de servicios y detecciones de discontinuidad.
+                </p>
+
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1 text-xs">
+                  {syncHistory.map(h => (
+                    <div key={h.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="font-bold text-white">{h.provider}</span>
+                        <span className="text-[11px] text-slate-400">{formatChileanDate(h.timestamp)}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                        <span>Total: <strong className="text-white">{h.totalFetched}</strong></span>
+                        <span className="text-emerald-400 font-bold">+{h.newServicesCount} nuevos</span>
+                        <span className="text-amber-400 font-bold">{h.modifiedCount} cambios</span>
+                        {h.missingCount > 0 && (
+                          <span className="text-rose-400 font-bold">{h.missingCount} desaparecidos</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 

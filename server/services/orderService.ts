@@ -1,4 +1,4 @@
-import { catalogService, CommercialCatalogService } from './catalogService.ts';
+import { catalogService, CommercialCatalogService, ServiceTier } from './catalogService.ts';
 import { pricingEngine, PriceCalculationResult } from './pricingEngine.ts';
 import { systemFollowsProvider } from '../providers/smm/systemFollows.ts';
 import { balanceService } from './balanceService.ts';
@@ -27,6 +27,8 @@ export interface CommercialOrder {
   userEmail: string;
   serviceId: string;
   serviceName: string;
+  tier?: ServiceTier;
+  technicalServiceId?: string;
   platform: string;
   targetUrl: string;
   quantity: number;
@@ -45,7 +47,8 @@ export interface CommercialOrder {
   // Estado y seguimiento
   status: OrderStatus;
   paymentId?: string;
-  paymentGateway?: 'WEBPAY_PLUS' | 'MERCADO_PAGO';
+  paymentUrl?: string;
+  paymentGateway?: 'FLOW';
   providerOrderId?: string;
   providerStatus?: string;
   startCount?: number;
@@ -192,7 +195,7 @@ export class OrderService {
     serviceId: string;
     targetUrl: string;
     quantity: number;
-    gateway: 'WEBPAY_PLUS' | 'MERCADO_PAGO';
+    gateway?: 'FLOW';
   }): Promise<{ order: CommercialOrder; priceCalc: PriceCalculationResult }> {
     // Buscar en catálogo comercial
     const commService = catalogService.getCommercialServiceById(params.serviceId);
@@ -203,6 +206,9 @@ export class OrderService {
     let cancel = false;
     let serviceName = 'Servicio Redes Sociales';
     let platform = 'Instagram';
+    let commCategory = 'Seguidores';
+    let tier: ServiceTier = params.serviceId.toUpperCase().includes('PREMIUM') ? 'PREMIUM' : 'FREE';
+    let technicalServiceId: string | undefined;
 
     if (commService) {
       originalRateUSD = commService.originalRateUSD;
@@ -212,6 +218,9 @@ export class OrderService {
       cancel = commService.cancel;
       serviceName = commService.commercialName;
       platform = commService.platform;
+      commCategory = commService.commercialCategory;
+      tier = commService.tier;
+      technicalServiceId = commService.technicalServiceId;
     } else {
       // Buscar en catálogo técnico si se pasó ID técnico directo
       const techService = catalogService.getTechnicalServiceById(params.serviceId);
@@ -223,6 +232,9 @@ export class OrderService {
         cancel = techService.cancel;
         serviceName = techService.name;
         platform = techService.platform;
+        commCategory = catalogService.detectCommercialCategory(techService.name, techService.category);
+        tier = techService.refill ? 'PREMIUM' : 'FREE';
+        technicalServiceId = techService.id;
       } else {
         throw new Error(`El servicio #${params.serviceId} no existe en el catálogo comercial.`);
       }
@@ -245,8 +257,9 @@ export class OrderService {
       originalRateUSD,
       params.quantity,
       params.serviceId,
-      platform,
-      params.gateway === 'WEBPAY_PLUS' ? 'WEBPAY' : 'MERCADOPAGO'
+      commCategory,
+      'FLOW',
+      tier
     );
 
     const now = new Date().toISOString();
@@ -258,6 +271,8 @@ export class OrderService {
       userEmail: params.userEmail,
       serviceId: params.serviceId,
       serviceName,
+      tier,
+      technicalServiceId,
       platform,
       targetUrl: params.targetUrl.trim(),
       quantity: params.quantity,
@@ -273,8 +288,9 @@ export class OrderService {
       estimatedNetProfitCLP: priceCalc.estimatedNetProfitCLP,
 
       status: 'AWAITING_PAYMENT',
-      paymentGateway: params.gateway,
-      refillAvailable: refill,
+      paymentGateway: 'FLOW',
+      remains: params.quantity,
+      refillAvailable: tier === 'PREMIUM' && refill,
       cancelAvailable: cancel,
       refillCount: 0,
 
@@ -284,7 +300,7 @@ export class OrderService {
         {
           status: 'AWAITING_PAYMENT',
           timestamp: now,
-          note: `Orden comercial iniciada. Esperando confirmación de pago por ${params.gateway}.`,
+          note: 'Orden comercial iniciada. Esperando confirmación de pago por Flow Chile.',
         },
       ],
     };
@@ -301,7 +317,7 @@ export class OrderService {
   public async handlePaymentSuccess(orderId: string, paymentDetails: {
     paymentId: string;
     authorizationCode?: string;
-    gateway: 'WEBPAY_PLUS' | 'MERCADO_PAGO';
+    gateway?: 'FLOW';
   }): Promise<CommercialOrder> {
     const order = this.orders.get(orderId);
     if (!order) {
@@ -317,7 +333,7 @@ export class OrderService {
     const now = new Date().toISOString();
     order.status = 'PAID';
     order.paymentId = paymentDetails.paymentId;
-    order.paymentGateway = paymentDetails.gateway;
+    order.paymentGateway = paymentDetails.gateway || 'FLOW';
     order.updatedAt = now;
     order.history.push({
       status: 'PAID',
@@ -333,16 +349,38 @@ export class OrderService {
 
   /**
    * Envía la orden pagada al proveedor SMM.
-   * Si no hay saldo o falla temporalmente, la retiene en PAID_WAITING_PROVIDER_BALANCE y la encola.
+   * - En Plan Free busca automáticamente el servicio disponible más barato en el proveedor.
+   * - En Plan Premium busca un servicio verificado CON reposición (refill).
+   * - Si el ID del proveedor cambió o falló por desactivación, re-sincroniza el catálogo y busca un servicio equivalente similar dentro del margen de ganancia.
    */
   public async dispatchToProvider(order: CommercialOrder): Promise<void> {
-    // 1. Obtener ID técnico real si viene de catálogo comercial
-    let targetProviderServiceId = order.serviceId;
+    const maxAllowedCostCLP = Math.round(order.totalPriceCLP * 0.72);
+    const resolution = catalogService.resolveDispatchService({
+      commercialServiceId: order.serviceId,
+      quantity: order.quantity,
+      tier: order.tier,
+      maxAllowedTotalCostCLP: maxAllowedCostCLP,
+    });
+
+    let targetTech = resolution.technicalService;
+    let targetProviderServiceId = targetTech ? targetTech.providerServiceId : order.serviceId;
     const comm = catalogService.getCommercialServiceById(order.serviceId);
-    if (comm) {
+    if (!targetTech && comm) {
       const tech = catalogService.getTechnicalServiceById(comm.technicalServiceId);
       if (tech) {
+        targetTech = tech;
         targetProviderServiceId = tech.providerServiceId;
+      }
+    }
+
+    if (targetTech) {
+      order.technicalServiceId = targetTech.id;
+      if (resolution.wasAutoReassigned && resolution.reason) {
+        order.history.push({
+          status: order.status,
+          timestamp: new Date().toISOString(),
+          note: resolution.reason,
+        });
       }
     }
 
@@ -385,15 +423,61 @@ export class OrderService {
     order.history.push({
       status: 'SUBMITTING',
       timestamp: now,
-      note: 'Despachando orden a API de SystemFollows.',
+      note: `Despachando orden a API de SystemFollows (Servicio técnico #${targetProviderServiceId}).`,
     });
 
     try {
-      const response = await systemFollowsProvider.createOrder({
+      let response = await systemFollowsProvider.createOrder({
         service: targetProviderServiceId,
         link: order.targetUrl,
         quantity: order.quantity,
       });
+
+      // Si el ID cambió o fue deshabilitado por el proveedor, resincronizar y reintentar automáticamente con un similar
+      if (response.error) {
+        const errLower = response.error.toLowerCase();
+        const isServiceIdError =
+          errLower.includes('service') ||
+          errLower.includes('disabled') ||
+          errLower.includes('not found') ||
+          errLower.includes('invalid id') ||
+          errLower.includes('unavailable');
+
+        if (isServiceIdError) {
+          await catalogService.syncTechnicalCatalog();
+          const fallback = catalogService.resolveDispatchService({
+            commercialServiceId: order.serviceId,
+            quantity: order.quantity,
+            tier: order.tier,
+            excludedTechIds: [targetProviderServiceId, ...(targetTech ? [targetTech.id] : [])],
+            maxAllowedTotalCostCLP: maxAllowedCostCLP,
+          });
+
+          if (fallback.technicalService) {
+            const newId = fallback.technicalService.providerServiceId;
+            order.technicalServiceId = fallback.technicalService.id;
+            order.history.push({
+              status: 'SUBMITTING',
+              timestamp: new Date().toISOString(),
+              note: `ID #${targetProviderServiceId} no disponible en proveedor ("${response.error}"). Reasignando automáticamente a servicio equivalente #${newId}.`,
+            });
+
+            await notificationService.notify({
+              title: `Reasignación automática por cambio de ID (#${targetProviderServiceId} → #${newId})`,
+              description: `La orden ${order.id} fue redirigida automáticamente al servicio equivalente #${newId} tras cambio en el proveedor.`,
+              level: 'WARNING',
+              entityType: 'ORDER',
+              entityId: order.id,
+            });
+
+            response = await systemFollowsProvider.createOrder({
+              service: newId,
+              link: order.targetUrl,
+              quantity: order.quantity,
+            });
+          }
+        }
+      }
 
       const updatedTime = new Date().toISOString();
 
@@ -448,6 +532,8 @@ export class OrderService {
         // Éxito confirmado por el proveedor
         order.providerOrderId = String(response.order);
         order.status = 'IN_PROGRESS';
+        order.providerStatus = 'In progress';
+        order.remains = order.remains ?? order.quantity;
         order.updatedAt = updatedTime;
         order.history.push({
           status: 'IN_PROGRESS',
@@ -540,19 +626,28 @@ export class OrderService {
     if (order.status === 'COMPLETED' || order.status === 'CANCELED') return order;
 
     try {
+      const prevRemains = order.remains;
+      const prevStart = order.startCount;
+      const prevProviderStatus = order.providerStatus;
+
       const statusRes = await systemFollowsProvider.getOrderStatus(order.providerOrderId);
       if (statusRes.error) return order;
 
       const now = new Date().toISOString();
       order.providerStatus = statusRes.status;
-      if (statusRes.start_count !== undefined) order.startCount = Number(statusRes.start_count);
-      if (statusRes.remains !== undefined) order.remains = Number(statusRes.remains);
+      if (statusRes.start_count !== undefined && !isNaN(Number(statusRes.start_count))) {
+        order.startCount = Number(statusRes.start_count);
+      }
+      if (statusRes.remains !== undefined && !isNaN(Number(statusRes.remains))) {
+        order.remains = Math.max(0, Number(statusRes.remains));
+      }
 
       const normalizedStatus = (statusRes.status || '').toLowerCase();
       let newInternalStatus: OrderStatus = order.status;
 
       if (normalizedStatus.includes('completed')) {
         newInternalStatus = 'COMPLETED';
+        order.remains = 0;
       } else if (normalizedStatus.includes('in progress') || normalizedStatus.includes('processing')) {
         newInternalStatus = 'IN_PROGRESS';
       } else if (normalizedStatus.includes('partial')) {
@@ -563,14 +658,23 @@ export class OrderService {
         newInternalStatus = 'PENDING';
       }
 
+      const changed =
+        newInternalStatus !== order.status ||
+        prevRemains !== order.remains ||
+        prevStart !== order.startCount ||
+        prevProviderStatus !== order.providerStatus;
+
       if (newInternalStatus !== order.status) {
         order.status = newInternalStatus;
-        order.updatedAt = now;
         order.history.push({
           status: newInternalStatus,
           timestamp: now,
-          note: `Estado actualizado desde SystemFollows: ${statusRes.status}.`,
+          note: `Estado actualizado desde SystemFollows: ${statusRes.status} (Restantes: ${order.remains ?? 0}).`,
         });
+      }
+
+      if (changed) {
+        order.updatedAt = now;
         await this.persistOrder(order);
       }
     } catch (e: any) {
@@ -578,6 +682,17 @@ export class OrderService {
     }
 
     return order;
+  }
+
+  public async refreshOrdersBatch(orderIds: string[]): Promise<CommercialOrder[]> {
+    const updated: CommercialOrder[] = [];
+    for (const id of orderIds.slice(0, 15)) {
+      try {
+        const res = await this.refreshOrderStatus(id);
+        updated.push(res);
+      } catch {}
+    }
+    return updated;
   }
 
   public async requestRefill(orderId: string, userId: string, isAdmin = false): Promise<{ success: boolean; message: string }> {
@@ -646,6 +761,16 @@ export class OrderService {
 
     await this.persistOrder(order);
     return { success: true, message: 'Orden cancelada correctamente.' };
+  }
+
+  public async setPaymentReference(orderId: string, paymentId: string, paymentUrl?: string): Promise<CommercialOrder | undefined> {
+    const order = this.orders.get(orderId);
+    if (!order) return undefined;
+    order.paymentId = paymentId;
+    if (paymentUrl) order.paymentUrl = paymentUrl;
+    order.updatedAt = new Date().toISOString();
+    await this.persistOrder(order);
+    return order;
   }
 
   public getOrder(id: string): CommercialOrder | undefined {

@@ -1,4 +1,4 @@
-export type PaymentGatewayType = 'WEBPAY_PLUS' | 'MERCADO_PAGO';
+export type PaymentGatewayType = 'FLOW';
 
 export type PaymentStatus =
   | 'CREATED'
@@ -16,6 +16,7 @@ export interface CreatePaymentParams {
   userEmail: string;
   serviceTitle: string;
   returnUrl: string;
+  confirmationUrl?: string;
 }
 
 export interface CreatePaymentResult {
@@ -24,13 +25,7 @@ export interface CreatePaymentResult {
   redirectUrl: string;
   url?: string;
   token?: string;
-  preferenceId?: string;
-  portalForm?: {
-    action: string;
-    idFormulario: string;
-    monto: number;
-    companyUrl: string;
-  };
+  flowOrder?: number;
 }
 
 export interface ConfirmPaymentResult {

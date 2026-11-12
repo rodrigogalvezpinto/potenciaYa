@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Flame, ShieldCheck, Heart } from 'lucide-react';
+import { TERMS_FINE_PRINT_PARAGRAPHS, TERMS_FINE_PRINT_TITLE } from '../constants/terms.ts';
 
 export const Footer: React.FC = () => {
+  const [showTerms, setShowTerms] = useState(false);
+
   return (
     <footer className="border-t border-slate-800 bg-slate-950 text-slate-400 text-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -49,18 +52,18 @@ export const Footer: React.FC = () => {
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-slate-300">
                 <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                <span>Transbank Webpay Plus</span>
-              </div>
-              <div className="flex items-center gap-2 text-slate-300">
-                <span className="w-2 h-2 rounded-full bg-sky-400"></span>
-                <span>Mercado Pago Chile</span>
+                <span>Flow Chile (Pasarela Oficial)</span>
               </div>
               <div className="flex items-center gap-2 text-slate-300">
                 <span className="w-2 h-2 rounded-full bg-orange-400"></span>
-                <span>Redcompra, Débito y Crédito</span>
+                <span>Débito, Crédito, Redcompra y MACH</span>
+              </div>
+              <div className="flex items-center gap-2 text-slate-300">
+                <span className="w-2 h-2 rounded-full bg-sky-400"></span>
+                <span>Servipag, Onepay y Transferencia</span>
               </div>
               <p className="text-[11px] text-slate-500 pt-2 leading-relaxed">
-                Sin comisiones de cambio internacional. Precios netos e IVA incluido en CLP.
+                Sin comisiones de cambio internacional. Confirmación automática en CLP.
               </p>
             </div>
           </div>
@@ -70,13 +73,37 @@ export const Footer: React.FC = () => {
         <div className="pt-8 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px]">
           <p>© {new Date().getFullYear()} PotenciaRedes. Todos los derechos reservados.</p>
           <div className="flex items-center gap-4 text-slate-500">
-            <span className="hover:text-slate-400 cursor-pointer">Términos del Servicio</span>
+            <button
+              type="button"
+              onClick={() => setShowTerms(prev => !prev)}
+              className="hover:text-slate-300 underline-offset-2 hover:underline cursor-pointer"
+            >
+              Términos del Servicio
+            </button>
             <span>•</span>
             <span className="hover:text-slate-400 cursor-pointer">Política de Privacidad</span>
             <span>•</span>
             <span className="hover:text-slate-400 cursor-pointer">Contacto: soporte@potenciaredes.cl</span>
           </div>
         </div>
+
+        {showTerms && (
+          <div className="mt-4 p-3 rounded-xl bg-slate-900/70 border border-slate-800/80 text-[10px] leading-relaxed text-slate-400 space-y-1">
+            <div className="flex items-center justify-between text-slate-300 font-semibold">
+              <span>{TERMS_FINE_PRINT_TITLE}</span>
+              <button
+                type="button"
+                onClick={() => setShowTerms(false)}
+                className="text-slate-500 hover:text-white cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+            {TERMS_FINE_PRINT_PARAGRAPHS.map((p, idx) => (
+              <p key={idx}>{p}</p>
+            ))}
+          </div>
+        )}
 
       </div>
     </footer>

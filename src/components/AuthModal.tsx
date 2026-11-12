@@ -85,7 +85,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
             {mode === 'login'
-              ? 'Accede a tu panel para ver tus compras y garantías'
+              ? 'Accede a tu panel para ver tus compras y avance en vivo'
               : 'Empieza a potenciar tus redes sociales en minutos'}
           </p>
         </div>

@@ -75,8 +75,8 @@ export const ServiceCatalog: React.FC<ServiceCatalogProps> = ({
     } else if (sortBy === 'minQty') {
       result.sort((a, b) => a.minQuantity - b.minQuantity);
     } else {
-      // Destacados primero: Premium > Estandar > Economico
-      const tierScore = (t?: ServiceTier) => t === 'PREMIUM' ? 3 : t === 'ESTANDAR' ? 2 : 1;
+      // Destacados primero: Premium > Free
+      const tierScore = (t?: ServiceTier) => (t === 'PREMIUM' ? 2 : 1);
       result.sort((a, b) => tierScore(b.tier) - tierScore(a.tier));
     }
 
@@ -97,30 +97,20 @@ export const ServiceCatalog: React.FC<ServiceCatalogProps> = ({
   };
 
   const getTierBadge = (tier?: ServiceTier) => {
-    switch (tier) {
-      case 'PREMIUM':
-        return (
-          <span className="inline-flex items-center gap-1 text-[11px] font-black uppercase tracking-wider text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-md">
-            <Crown className="w-3 h-3 text-amber-400" />
-            Modalidad Premium
-          </span>
-        );
-      case 'ESTANDAR':
-        return (
-          <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-sky-300 bg-sky-500/10 border border-sky-500/30 px-2 py-0.5 rounded-md">
-            <Sparkles className="w-3 h-3 text-sky-400" />
-            Modalidad Estándar
-          </span>
-        );
-      case 'ECONOMICO':
-      default:
-        return (
-          <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-md">
-            <Zap className="w-3 h-3 text-emerald-400" />
-            Modalidad Económico
-          </span>
-        );
+    if (tier === 'PREMIUM') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-black uppercase tracking-wider text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-md">
+          <Crown className="w-3 h-3 text-amber-400" />
+          Plan Premium
+        </span>
+      );
     }
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-md">
+        <Zap className="w-3 h-3 text-emerald-400" />
+        Plan Free
+      </span>
+    );
   };
 
   return (
@@ -134,10 +124,10 @@ export const ServiceCatalog: React.FC<ServiceCatalogProps> = ({
             <span>Catálogo Comercial Inteligente</span>
           </div>
           <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-            Servicios Clasificados en Pesos Chilenos
+            Elige entre Plan Free o Plan Premium
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Compara entre opciones <strong className="text-emerald-400">Económicas</strong>, <strong className="text-sky-400">Estándar</strong> y <strong className="text-amber-300">Premium</strong> con condiciones reales documentadas.
+            Compara <strong className="text-emerald-400">Plan Free</strong> (entrada económica) y <strong className="text-amber-300">Plan Premium</strong> (mayor estabilidad y retención superior).
           </p>
         </div>
 
@@ -162,15 +152,14 @@ export const ServiceCatalog: React.FC<ServiceCatalogProps> = ({
         </div>
       </div>
 
-      {/* Selector de Modalidades / Tiers */}
+      {/* Selector de Planes: Free vs Premium */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4 p-2 bg-slate-900/40 border border-slate-800/80 rounded-2xl">
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-          <span className="text-xs font-semibold text-slate-400 pl-2 pr-1">Modalidad:</span>
+          <span className="text-xs font-semibold text-slate-400 pl-2 pr-1">Plan:</span>
           {[
-            { id: 'ALL', label: 'Todas las modalidades' },
-            { id: 'ECONOMICO', label: '⚡ Económico' },
-            { id: 'ESTANDAR', label: '✨ Estándar' },
-            { id: 'PREMIUM', label: '👑 Premium (Refill)' },
+            { id: 'ALL', label: 'Todos los planes' },
+            { id: 'FREE', label: '⚡ Plan Free' },
+            { id: 'PREMIUM', label: '👑 Plan Premium (Alta Estabilidad)' },
           ].map(t => (
             <button
               key={t.id}
@@ -254,9 +243,7 @@ export const ServiceCatalog: React.FC<ServiceCatalogProps> = ({
                 className={`group relative flex flex-col justify-between bg-slate-900/80 hover:bg-slate-900 border rounded-2xl p-5 sm:p-6 transition-all duration-200 hover:shadow-xl ${
                   service.tier === 'PREMIUM'
                     ? 'border-amber-500/30 hover:border-amber-500/50 hover:shadow-amber-500/5'
-                    : service.tier === 'ESTANDAR'
-                    ? 'border-sky-500/20 hover:border-sky-500/40 hover:shadow-sky-500/5'
-                    : 'border-slate-800 hover:border-slate-700'
+                    : 'border-emerald-500/20 hover:border-emerald-500/40'
                 }`}
               >
                 <div>
@@ -301,15 +288,15 @@ export const ServiceCatalog: React.FC<ServiceCatalogProps> = ({
                   </div>
 
                   <div className="mt-2 flex items-center gap-2 text-[11px]">
-                    {service.refill ? (
-                      <span className="flex items-center gap-1 text-emerald-400 font-medium">
-                        <RotateCcw className="w-3 h-3" />
-                        Garantía 30 días de reposición
+                    {service.tier === 'PREMIUM' ? (
+                      <span className="flex items-center gap-1 text-amber-300 font-medium">
+                        <Crown className="w-3 h-3" />
+                        Alta retención y estabilidad
                       </span>
                     ) : (
-                      <span className="text-slate-500 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-slate-600" />
-                        Entrega directa sin refill
+                      <span className="text-slate-400 flex items-center gap-1">
+                        <Zap className="w-3 h-3 text-emerald-400" />
+                        Entrega rápida automatizada
                       </span>
                     )}
                   </div>

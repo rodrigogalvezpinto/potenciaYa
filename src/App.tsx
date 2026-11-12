@@ -23,12 +23,11 @@ function MainApp() {
   const [selectedService, setSelectedService] = useState<CommercialService | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
-  // Detección de retorno de pasarela de pago (Webpay o Mercado Pago)
-  const isPaymentReturn = 
-    window.location.pathname.includes('webpay-return') ||
-    window.location.pathname.includes('mercadopago-return') ||
-    window.location.search.includes('token_ws') ||
-    window.location.search.includes('preference_id');
+  // Detección de retorno de pasarela de pago Flow.cl
+  const isPaymentReturn =
+    window.location.pathname.includes('flow-return') ||
+    window.location.search.includes('flow-return') ||
+    window.location.search.includes('token=');
 
   const fetchCatalog = async () => {
     try {

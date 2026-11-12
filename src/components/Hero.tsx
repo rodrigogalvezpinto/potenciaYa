@@ -40,14 +40,13 @@ export const Hero: React.FC<HeroProps> = ({ onSelectPlatform, selectedPlatform }
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-white leading-[1.15]">
             Potencia tu presencia en redes con{' '}
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 via-rose-500 to-amber-300">
-              crecimiento real y garantizado
+              crecimiento rápido e impacto inmediato
             </span>
           </h1>
           <p className="mt-4 sm:mt-6 text-sm sm:text-lg text-slate-300 leading-relaxed max-w-2xl mx-auto font-normal">
             Seguidores, likes, visualizaciones y reproducciones de alta retención. Compra directa en{' '}
             <strong className="text-white font-semibold">Pesos Chilenos (CLP)</strong> con{' '}
-            <span className="text-orange-400 font-medium">Webpay Plus</span> o{' '}
-            <span className="text-sky-400 font-medium">Mercado Pago</span>. Sin pedir contraseñas.
+            <span className="text-emerald-400 font-medium">Flow Chile</span> (Webpay, Servipag, MACH y tarjetas). Sin pedir contraseñas.
           </p>
 
           {/* Botones de acción */}
@@ -67,7 +66,7 @@ export const Hero: React.FC<HeroProps> = ({ onSelectPlatform, selectedPlatform }
             </a>
           </div>
 
-          {/* Métricas y Garantías */}
+          {/* Métricas de la Plataforma */}
           <div className="mt-10 grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 max-w-3xl mx-auto text-left">
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3 sm:p-4 backdrop-blur-sm">
               <div className="flex items-center gap-2 text-orange-400 mb-1">
@@ -90,10 +89,10 @@ export const Hero: React.FC<HeroProps> = ({ onSelectPlatform, selectedPlatform }
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3 sm:p-4 backdrop-blur-sm">
               <div className="flex items-center gap-2 text-rose-400 mb-1">
                 <Award className="w-4 h-4" />
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Garantía</span>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Seguimiento</span>
               </div>
-              <p className="text-sm sm:text-base font-bold text-white">30 Días de Refill</p>
-              <p className="text-[11px] text-slate-400">Reposición sin costo adicional</p>
+              <p className="text-sm sm:text-base font-bold text-white">Avance en Vivo</p>
+              <p className="text-[11px] text-slate-400">Monitoreo de entrega en línea</p>
             </div>
 
             <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3 sm:p-4 backdrop-blur-sm">
@@ -102,7 +101,7 @@ export const Hero: React.FC<HeroProps> = ({ onSelectPlatform, selectedPlatform }
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Chile</span>
               </div>
               <p className="text-sm sm:text-base font-bold text-white">Pago Local en CLP</p>
-              <p className="text-[11px] text-slate-400">Webpay Plus & Mercado Pago</p>
+              <p className="text-[11px] text-slate-400">Flow Chile (Tarjetas, Servipag, MACH)</p>
             </div>
           </div>
 

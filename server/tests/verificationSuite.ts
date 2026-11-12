@@ -150,20 +150,20 @@ export class VerificationSuite {
       results.push({ scenarioNumber: 6, title: 'Un servicio vuelve a estar disponible', passed: false, details: e.message, timestamp: now });
     }
 
-    // 7. No existen tres modalidades comerciales
+    // 7. No existen modalidades fuera de Plan Free / Plan Premium
     try {
       const comm = catalogService.getCommercialServices();
-      // Debe mostrar solo las modalidades disponibles sin inventar duplicados
-      const validTiers = comm.every(c => ['ECONOMICO', 'ESTANDAR', 'PREMIUM'].includes(c.tier));
+      const validTiers = comm.every(c => ['FREE', 'PREMIUM'].includes(c.tier));
+      const allPremiumHaveRefill = comm.filter(c => c.tier === 'PREMIUM').every(c => c.refill === true);
       results.push({
         scenarioNumber: 7,
-        title: 'No existen tres modalidades comerciales',
-        passed: validTiers,
-        details: `El sistema solo publica las modalidades con servicios técnicos reales comprobados.`,
+        title: 'Clasificación estricta Plan Free y Plan Premium (con reposición)',
+        passed: validTiers && allPremiumHaveRefill,
+        details: `Catálogo validado con ${comm.filter(c => c.tier === 'FREE').length} servicios Free y ${comm.filter(c => c.tier === 'PREMIUM').length} Premium (100% con refill).`,
         timestamp: now,
       });
     } catch (e: any) {
-      results.push({ scenarioNumber: 7, title: 'No existen tres modalidades comerciales', passed: false, details: e.message, timestamp: now });
+      results.push({ scenarioNumber: 7, title: 'Clasificación estricta Plan Free y Plan Premium (con reposición)', passed: false, details: e.message, timestamp: now });
     }
 
     // 8. Dos servicios son equivalentes
@@ -181,19 +181,31 @@ export class VerificationSuite {
       results.push({ scenarioNumber: 8, title: 'Dos servicios son equivalentes', passed: false, details: e.message, timestamp: now });
     }
 
-    // 9. Se detecta un servicio más económico
+    // 9. Se detecta un servicio más económico para Free y con reposición para Premium + redondeo estricto a .990
     try {
+      const { pricingEngine } = await import('../services/pricingEngine.ts');
       const techList = catalogService.getTechnicalServices();
       const sorted = [...techList].sort((a, b) => a.rateUSD - b.rateUSD);
+      const freeComm = catalogService.getCommercialServices({ tier: 'FREE' })[0];
+      const resolvedFree = freeComm
+        ? catalogService.resolveDispatchService({ commercialServiceId: freeComm.id, quantity: Math.max(freeComm.minQuantity, 500), tier: 'FREE' })
+        : null;
+      const sampleQtys = [250, 500, 1000, 2500];
+      const all990 = freeComm
+        ? sampleQtys.every(q => {
+            const calc = pricingEngine.calculate(freeComm.originalRateUSD, q, freeComm.id, freeComm.commercialCategory, 'FLOW', freeComm.tier);
+            return calc.totalPriceCLP % 1000 === 990 && calc.unitPricePer1000CLP % 1000 === 990;
+          })
+        : true;
       results.push({
         scenarioNumber: 9,
-        title: 'Se detecta un servicio más económico',
-        passed: sorted.length > 0 && sorted[0].rateUSD <= sorted[sorted.length - 1].rateUSD,
-        details: `Algoritmo selecciona prioritariamente tarifa mínima ($${sorted[0]?.rateUSD} USD) para modalidad Económico.`,
+        title: 'Selección más económica (Free), reposición (Premium) y redondeo .990',
+        passed: sorted.length > 0 && sorted[0].rateUSD <= sorted[sorted.length - 1].rateUSD && Boolean(resolvedFree?.technicalService) && all990,
+        details: `Tarifa mínima ($${sorted[0]?.rateUSD} USD) para Free, refill=true para Premium y redondeo estricto .990 CLP validado en todas las cantidades.`,
         timestamp: now,
       });
     } catch (e: any) {
-      results.push({ scenarioNumber: 9, title: 'Se detecta un servicio más económico', passed: false, details: e.message, timestamp: now });
+      results.push({ scenarioNumber: 9, title: 'Selección más económica (Free), reposición (Premium) y redondeo .990', passed: false, details: e.message, timestamp: now });
     }
 
     // 10. El proveedor tiene saldo insuficiente
@@ -241,7 +253,7 @@ export class VerificationSuite {
         serviceId: catalogService.getCommercialServices()[0]?.id || '101',
         targetUrl: '@usuario_test',
         quantity: 1000,
-        gateway: 'WEBPAY_PLUS',
+        gateway: 'FLOW',
       });
       // Simular falta de saldo forzada en despacho
       dummyOrder.order.status = 'PAID_WAITING_PROVIDER_BALANCE';
@@ -312,7 +324,7 @@ export class VerificationSuite {
         serviceId: catalogService.getCommercialServices()[0]?.id || '101',
         targetUrl: '@usuario_timeout',
         quantity: 1000,
-        gateway: 'WEBPAY_PLUS',
+        gateway: 'FLOW',
       });
       dummyOrder.order.status = 'REQUIRES_RECONCILIATION';
       results.push({
@@ -334,13 +346,13 @@ export class VerificationSuite {
         serviceId: catalogService.getCommercialServices()[0]?.id || '101',
         targetUrl: '@usuario_idemp',
         quantity: 1000,
-        gateway: 'WEBPAY_PLUS',
+        gateway: 'FLOW',
       });
       // Primer callback
-      await orderService.handlePaymentSuccess(order.order.id, { paymentId: 'PAY-1', gateway: 'WEBPAY_PLUS', authorizationCode: 'AUTH-1' });
+      await orderService.handlePaymentSuccess(order.order.id, { paymentId: 'PAY-1', gateway: 'FLOW', authorizationCode: 'AUTH-1' });
       const statusAfterFirst = orderService.getOrder(order.order.id)?.status;
       // Segundo callback repetido
-      await orderService.handlePaymentSuccess(order.order.id, { paymentId: 'PAY-1-DUP', gateway: 'WEBPAY_PLUS', authorizationCode: 'AUTH-1' });
+      await orderService.handlePaymentSuccess(order.order.id, { paymentId: 'PAY-1-DUP', gateway: 'FLOW', authorizationCode: 'AUTH-1' });
       const historyLength = orderService.getOrder(order.order.id)?.history.filter(h => h.status === 'PAID').length;
       results.push({
         scenarioNumber: 16,

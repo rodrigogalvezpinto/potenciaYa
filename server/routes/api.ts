@@ -6,8 +6,7 @@ import { balanceService } from '../services/balanceService.ts';
 import { jobQueueService } from '../services/jobQueueService.ts';
 import { notificationService } from '../services/notificationService.ts';
 import { verificationSuite } from '../tests/verificationSuite.ts';
-import { webpayProvider } from '../providers/payments/webpay.ts';
-import { mercadoPagoProvider } from '../providers/payments/mercadopago.ts';
+import { flowProvider } from '../providers/payments/flow.ts';
 import { systemFollowsProvider } from '../providers/smm/systemFollows.ts';
 import { config } from '../config.ts';
 import { adminFirestore } from '../firebaseAdmin.ts';
@@ -23,7 +22,23 @@ async function loadSettingsFromFirestore() {
       if (data) {
         if (data.usdClpRate) pricingEngine.setExchangeRate(Number(data.usdClpRate));
         if (data.defaultGlobalMarginPercent) pricingEngine.setDefaultMargin(Number(data.defaultGlobalMarginPercent));
+        if (data.freeBasePriceCLP || data.freeMicroPriceCLP || data.premiumBasePriceCLP) {
+          pricingEngine.setPlanFloorPrices({
+            ...(data.freeBasePriceCLP && { freeBasePriceCLP: Number(data.freeBasePriceCLP) }),
+            ...(data.freeMicroPriceCLP && { freeMicroPriceCLP: Number(data.freeMicroPriceCLP) }),
+            ...(data.premiumBasePriceCLP && { premiumBasePriceCLP: Number(data.premiumBasePriceCLP) }),
+          });
+        }
         if (data.systemFollowsApiKey) systemFollowsProvider.updateCredentials(String(data.systemFollowsApiKey));
+        if (data.flowApiKey || data.flowSecretKey || data.flowEnvironment) {
+          flowProvider.updateCredentials({
+            ...(data.flowApiKey && { apiKey: String(data.flowApiKey) }),
+            ...(data.flowSecretKey && { secretKey: String(data.flowSecretKey) }),
+            ...(data.flowEnvironment && {
+              environment: String(data.flowEnvironment).toUpperCase() === 'SANDBOX' ? 'SANDBOX' : 'PRODUCTION',
+            }),
+          });
+        }
         if (data.thresholds) balanceService.setThresholds(data.thresholds);
         console.log('✅ Configuraciones globales cargadas desde Firestore.');
       }
@@ -52,8 +67,8 @@ apiRouter.get('/health', async (_req: Request, res: Response) => {
     balance: balanceService.getStatus(),
     integrations: {
       systemFollowsConfigured: systemFollowsProvider.isConfigured(),
-      webpayEnvironment: config.webpay.environment,
-      mercadopagoEnvironment: config.mercadopago.environment,
+      flowConfigured: flowProvider.isConfigured(),
+      flowEnvironment: flowProvider.getEnvironment(),
     },
     notificationsCount: notificationService.getCounts(),
     queueCount: jobQueueService.getCounts(),
@@ -99,22 +114,28 @@ apiRouter.get('/catalog/:id', (req: Request, res: Response) => {
 // Cotización comercial en vivo
 apiRouter.post('/pricing/quote', (req: Request, res: Response) => {
   try {
-    const { serviceId, quantity, gateway } = req.body;
+    const { serviceId, quantity } = req.body;
     const commService = catalogService.getCommercialServiceById(String(serviceId));
     let originalRateUSD = 1.5;
     let serviceName = 'Servicio';
     let platform = 'Instagram';
+    let commCategory = 'Seguidores';
+    let tier: 'FREE' | 'PREMIUM' = 'FREE';
 
     if (commService) {
       originalRateUSD = commService.originalRateUSD;
       serviceName = commService.commercialName;
       platform = commService.platform;
+      commCategory = commService.commercialCategory;
+      tier = commService.tier;
     } else {
       const techService = catalogService.getTechnicalServiceById(String(serviceId));
       if (techService) {
         originalRateUSD = techService.rateUSD;
         serviceName = techService.name;
         platform = techService.platform;
+        commCategory = catalogService.detectCommercialCategory(techService.name, techService.category);
+        tier = techService.refill ? 'PREMIUM' : 'FREE';
       } else {
         return res.status(404).json({ success: false, error: 'Servicio no encontrado' });
       }
@@ -129,8 +150,9 @@ apiRouter.post('/pricing/quote', (req: Request, res: Response) => {
       originalRateUSD,
       qty,
       serviceId,
-      platform,
-      gateway === 'MERCADO_PAGO' ? 'MERCADOPAGO' : 'WEBPAY'
+      commCategory,
+      'FLOW',
+      tier
     );
 
     res.json({
@@ -139,6 +161,7 @@ apiRouter.post('/pricing/quote', (req: Request, res: Response) => {
         id: serviceId,
         name: serviceName,
         platform,
+        tier,
       },
       quote: calculation,
     });
@@ -152,7 +175,7 @@ apiRouter.post('/pricing/quote', (req: Request, res: Response) => {
 // -------------------------------------------------------------
 apiRouter.post('/orders/draft', async (req: Request, res: Response) => {
   try {
-    const { userId, userEmail, serviceId, targetUrl, quantity, gateway } = req.body;
+    const { userId, userEmail, serviceId, targetUrl, quantity } = req.body;
 
     if (!serviceId || !targetUrl || !quantity) {
       return res.status(400).json({ success: false, error: 'Faltan parámetros requeridos para la orden' });
@@ -167,7 +190,7 @@ apiRouter.post('/orders/draft', async (req: Request, res: Response) => {
       serviceId: String(serviceId),
       targetUrl: String(targetUrl),
       quantity: parseInt(quantity, 10),
-      gateway: gateway === 'MERCADO_PAGO' ? 'MERCADO_PAGO' : 'WEBPAY_PLUS',
+      gateway: 'FLOW',
     });
 
     res.json({
@@ -180,7 +203,10 @@ apiRouter.post('/orders/draft', async (req: Request, res: Response) => {
   }
 });
 
-apiRouter.post('/payments/webpay/create', async (req: Request, res: Response) => {
+// -------------------------------------------------------------
+// FLOW.CL REST API v3 (Creación, Webhook urlConfirmation y Confirmación)
+// -------------------------------------------------------------
+apiRouter.post('/payments/flow/create', async (req: Request, res: Response) => {
   try {
     const { orderId } = req.body;
     const order = orderService.getOrder(orderId);
@@ -188,52 +214,106 @@ apiRouter.post('/payments/webpay/create', async (req: Request, res: Response) =>
       return res.status(404).json({ success: false, error: 'Orden comercial no encontrada' });
     }
 
-    const host = req.get('host') || 'localhost:3000';
-    const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-    const returnUrl = `${protocol}://${host}/checkout/webpay-return?orderId=${order.id}`;
+    const host = (req.get('x-forwarded-host') || req.get('host') || 'localhost:3000').split(',')[0].trim();
+    const protoHeader = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
+    const protocol = protoHeader === 'https' || host.endsWith('.run.app') ? 'https' : 'http';
+    const returnUrl = `${protocol}://${host}/checkout/flow-return?orderId=${encodeURIComponent(order.id)}`;
+    const confirmationUrl = `${protocol}://${host}/api/payments/flow/webhook`;
 
-    const paymentResult = await webpayProvider.createPayment({
+    const paymentResult = await flowProvider.createPayment({
       orderId: order.id,
       amountCLP: order.totalPriceCLP,
       userEmail: order.userEmail,
       serviceTitle: order.serviceName,
       returnUrl,
+      confirmationUrl,
     });
+
+    await orderService.setPaymentReference(order.id, paymentResult.paymentId, paymentResult.redirectUrl);
 
     res.json({
       success: true,
       payment: paymentResult,
     });
   } catch (error: any) {
+    console.error('Error creando pago Flow:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-apiRouter.post('/payments/webpay/commit', async (req: Request, res: Response) => {
+// Webhook asíncrono server-to-server llamado por Flow (urlConfirmation)
+apiRouter.post('/payments/flow/webhook', async (req: Request, res: Response) => {
+  try {
+    const token = req.body?.token || req.query?.token;
+    if (!token) {
+      return res.status(400).send('Missing token');
+    }
+
+    const confirmRes = await flowProvider.confirmPayment(String(token));
+    const targetOrderId = confirmRes.orderId;
+    const existingOrder = targetOrderId ? orderService.getOrder(targetOrderId) : undefined;
+
+    if (
+      confirmRes.status === 'APPROVED' &&
+      existingOrder &&
+      confirmRes.amountCLP >= existingOrder.totalPriceCLP
+    ) {
+      await orderService.handlePaymentSuccess(existingOrder.id, {
+        paymentId: confirmRes.paymentId,
+        authorizationCode: confirmRes.authorizationCode,
+        gateway: 'FLOW',
+      });
+    }
+
+    return res.status(200).send('OK');
+  } catch (error: any) {
+    console.error('Error en webhook Flow:', error);
+    return res.status(200).send('OK');
+  }
+});
+
+// Confirmación activa desde el frontend (/checkout/flow-return o botón Verificar Pago)
+apiRouter.post('/payments/flow/confirm', async (req: Request, res: Response) => {
   try {
     const { token, orderId } = req.body;
     if (!token && !orderId) {
-      return res.status(400).json({ success: false, error: 'Token de Webpay requerido' });
+      return res.status(400).json({ success: false, error: 'Token o ID de orden requerido para verificar Flow' });
     }
 
-    const confirmRes = await webpayProvider.confirmPayment(token || 'TBK-MOCK-SANDBOX');
-    const targetOrderId = orderId || confirmRes.orderId;
-    const existingOrder = orderService.getOrder(targetOrderId);
+    const orderFromId = orderId ? orderService.getOrder(String(orderId)) : undefined;
+    const effectiveToken = token ? String(token) : orderFromId?.paymentId;
 
-    // Verificación estricta de monto para evitar discrepancias o fraude
-    if (confirmRes.amountCLP > 0 && existingOrder && confirmRes.amountCLP < existingOrder.totalPriceCLP) {
+    const confirmRes = effectiveToken
+      ? await flowProvider.confirmPayment(effectiveToken)
+      : await flowProvider.getStatusByCommerceId(String(orderId));
+
+    const targetOrderId = (orderId && orderService.getOrder(String(orderId)))
+      ? String(orderId)
+      : confirmRes.orderId;
+    const existingOrder = targetOrderId ? orderService.getOrder(targetOrderId) : undefined;
+
+    if (!existingOrder) {
+      return res.status(404).json({
+        success: false,
+        status: confirmRes.status,
+        error: 'Orden comercial no encontrada en el sistema.',
+      });
+    }
+
+    // Verificación estricta de monto para evitar fraude o alteración
+    if (confirmRes.amountCLP > 0 && confirmRes.amountCLP < existingOrder.totalPriceCLP) {
       return res.status(400).json({
         success: false,
         status: 'REJECTED',
-        error: `El monto pagado (${confirmRes.amountCLP} CLP) es menor al valor de la orden (${existingOrder.totalPriceCLP} CLP).`,
+        error: `El monto pagado en Flow (${confirmRes.amountCLP} CLP) es menor al total de la orden (${existingOrder.totalPriceCLP} CLP).`,
       });
     }
 
     if (confirmRes.status === 'APPROVED') {
-      const updatedOrder = await orderService.handlePaymentSuccess(targetOrderId, {
+      const updatedOrder = await orderService.handlePaymentSuccess(existingOrder.id, {
         paymentId: confirmRes.paymentId,
         authorizationCode: confirmRes.authorizationCode,
-        gateway: 'WEBPAY_PLUS',
+        gateway: 'FLOW',
       });
       return res.json({
         success: true,
@@ -243,98 +323,24 @@ apiRouter.post('/payments/webpay/commit', async (req: Request, res: Response) =>
       });
     }
 
-    res.json({
-      success: false,
-      status: confirmRes.status,
-      message: 'La transacción no fue aprobada por el emisor bancario.',
-      confirmation: confirmRes,
-    });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Confirmación de pago realizado en portal oficial Webpay.cl (idFormulario 436254 / company 186612)
-apiRouter.post('/payments/webpay/portal-confirm', async (req: Request, res: Response) => {
-  try {
-    const { orderId, authorizationCode } = req.body;
-    if (!orderId) {
-      return res.status(400).json({ success: false, error: 'orderId es requerido' });
-    }
-    const order = orderService.getOrder(orderId);
-    if (!order) {
-      return res.status(404).json({ success: false, error: 'Orden comercial no encontrada' });
-    }
-
-    const authCode = authorizationCode ? String(authorizationCode).trim() : `WPY-${Date.now().toString().slice(-6)}`;
-    const updatedOrder = await orderService.handlePaymentSuccess(orderId, {
-      paymentId: `WPY-PORTAL-${Date.now()}`,
-      authorizationCode: authCode,
-      gateway: 'WEBPAY_PLUS',
-    });
-
-    res.json({
-      success: true,
-      status: 'APPROVED',
-      order: updatedOrder,
-      message: 'Pago de Webpay.cl confirmado exitosamente. Tu orden ha sido despachada.',
-    });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-apiRouter.post('/payments/mercadopago/create', async (req: Request, res: Response) => {
-  try {
-    const { orderId } = req.body;
-    const order = orderService.getOrder(orderId);
-    if (!order) {
-      return res.status(404).json({ success: false, error: 'Orden no encontrada' });
-    }
-
-    const host = req.get('host') || 'localhost:3000';
-    const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-    const returnUrl = `${protocol}://${host}/checkout/mercadopago-return?orderId=${order.id}`;
-
-    const paymentResult = await mercadoPagoProvider.createPayment({
-      orderId: order.id,
-      amountCLP: order.totalPriceCLP,
-      userEmail: order.userEmail,
-      serviceTitle: order.serviceName,
-      returnUrl,
-    });
-
-    res.json({
-      success: true,
-      payment: paymentResult,
-    });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-apiRouter.post('/payments/mercadopago/confirm', async (req: Request, res: Response) => {
-  try {
-    const { orderId, preferenceId } = req.body;
-    const confirmRes = await mercadoPagoProvider.confirmPayment(preferenceId || 'MP-PREF-MOCK');
-
-    if (confirmRes.status === 'APPROVED') {
-      const updatedOrder = await orderService.handlePaymentSuccess(orderId, {
-        paymentId: confirmRes.paymentId,
-        authorizationCode: confirmRes.authorizationCode,
-        gateway: 'MERCADO_PAGO',
-      });
+    if (confirmRes.status === 'PENDING') {
       return res.json({
-        success: true,
-        status: 'APPROVED',
-        order: updatedOrder,
+        success: false,
+        status: 'PENDING',
+        order: existingOrder,
+        message: 'El pago aún está pendiente de confirmación en Flow (puede demorar unos segundos o estar en espera de caja Servipag/Sencillito).',
+        confirmation: confirmRes,
       });
     }
 
-    res.json({
+    return res.json({
       success: false,
       status: confirmRes.status,
-      message: 'El pago no ha sido aprobado aún.',
+      order: existingOrder,
+      message: confirmRes.status === 'CANCELED'
+        ? 'El pago fue cancelado o expiró en Flow.'
+        : 'El pago en Flow fue rechazado o no pudo ser confirmado.',
+      confirmation: confirmRes,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -372,6 +378,19 @@ apiRouter.get('/orders/:orderId', (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'Pedido no encontrado' });
     }
     res.json({ success: true, order });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+apiRouter.post('/orders/refresh-batch', async (req: Request, res: Response) => {
+  try {
+    const { orderIds } = req.body;
+    if (!Array.isArray(orderIds)) {
+      return res.status(400).json({ success: false, error: 'orderIds debe ser una lista' });
+    }
+    const orders = await orderService.refreshOrdersBatch(orderIds.map(String));
+    res.json({ success: true, orders });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -632,17 +651,66 @@ apiRouter.get('/admin/orders', (req: Request, res: Response) => {
   }
 });
 
+apiRouter.post('/admin/flow/test', async (req: Request, res: Response) => {
+  try {
+    const { testEmail, amountCLP } = req.body || {};
+    const email = (typeof testEmail === 'string' && testEmail.includes('@'))
+      ? testEmail.trim()
+      : (config.adminEmails[0] || 'rodrigogalvez@42labs.cl');
+    const amount = Math.max(350, Math.min(20000, Number(amountCLP) || 500));
+
+    const host = (req.get('x-forwarded-host') || req.get('host') || 'localhost:3000').split(',')[0].trim();
+    const protoHeader = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
+    const protocol = protoHeader === 'https' || host.endsWith('.run.app') ? 'https' : 'http';
+
+    const testOrderId = `TEST-FLOW-${Date.now()}`;
+    const returnUrl = `${protocol}://${host}/checkout/flow-return?orderId=${encodeURIComponent(testOrderId)}`;
+    const confirmationUrl = `${protocol}://${host}/api/payments/flow/webhook`;
+
+    const result = await flowProvider.createPayment({
+      orderId: testOrderId,
+      amountCLP: amount,
+      userEmail: email,
+      serviceTitle: 'Prueba de Integración Flow PotenciaRedes',
+      returnUrl,
+      confirmationUrl,
+    });
+
+    const checkStatus = await flowProvider.confirmPayment(result.token || result.paymentId);
+
+    res.json({
+      success: true,
+      environment: flowProvider.getEnvironment(),
+      testOrderId,
+      flowOrder: result.flowOrder,
+      token: result.token,
+      redirectUrl: result.redirectUrl,
+      url: result.url,
+      confirmationUrl,
+      returnUrl,
+      getStatusVerified: checkStatus.status,
+      amountCLP: amount,
+      email,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 apiRouter.get('/admin/settings', (_req: Request, res: Response) => {
+  const floorPrices = pricingEngine.getPlanFloorPrices();
   res.json({
     success: true,
     settings: {
       usdClpRate: pricingEngine.getExchangeRate(),
       defaultGlobalMarginPercent: pricingEngine.getDefaultMargin(),
+      freeBasePriceCLP: floorPrices.freeBasePriceCLP,
+      freeMicroPriceCLP: floorPrices.freeMicroPriceCLP,
+      premiumBasePriceCLP: floorPrices.premiumBasePriceCLP,
       systemFollowsApiUrl: config.systemFollows.apiUrl,
       systemFollowsConfigured: systemFollowsProvider.isConfigured(),
-      webpayEnvironment: config.webpay.environment,
-      webpayCommerceCode: config.webpay.commerceCode,
-      mercadopagoEnvironment: config.mercadopago.environment,
+      flowConfigured: flowProvider.isConfigured(),
+      flowEnvironment: flowProvider.getEnvironment(),
       adminEmails: config.adminEmails,
       thresholds: balanceService.getThresholds(),
     },
@@ -651,7 +719,18 @@ apiRouter.get('/admin/settings', (_req: Request, res: Response) => {
 
 apiRouter.post('/admin/settings', async (req: Request, res: Response) => {
   try {
-    const { usdClpRate, defaultGlobalMarginPercent, systemFollowsApiKey, thresholds } = req.body;
+    const {
+      usdClpRate,
+      defaultGlobalMarginPercent,
+      freeBasePriceCLP,
+      freeMicroPriceCLP,
+      premiumBasePriceCLP,
+      systemFollowsApiKey,
+      flowApiKey,
+      flowSecretKey,
+      flowEnvironment,
+      thresholds,
+    } = req.body;
 
     if (usdClpRate && !isNaN(Number(usdClpRate))) {
       pricingEngine.setExchangeRate(Number(usdClpRate));
@@ -661,19 +740,51 @@ apiRouter.post('/admin/settings', async (req: Request, res: Response) => {
       pricingEngine.setDefaultMargin(Number(defaultGlobalMarginPercent));
     }
 
+    if (freeBasePriceCLP || freeMicroPriceCLP || premiumBasePriceCLP) {
+      pricingEngine.setPlanFloorPrices({
+        ...(freeBasePriceCLP && !isNaN(Number(freeBasePriceCLP)) && { freeBasePriceCLP: Number(freeBasePriceCLP) }),
+        ...(freeMicroPriceCLP && !isNaN(Number(freeMicroPriceCLP)) && { freeMicroPriceCLP: Number(freeMicroPriceCLP) }),
+        ...(premiumBasePriceCLP && !isNaN(Number(premiumBasePriceCLP)) && { premiumBasePriceCLP: Number(premiumBasePriceCLP) }),
+      });
+    }
+
     if (systemFollowsApiKey && typeof systemFollowsApiKey === 'string' && systemFollowsApiKey.trim().length > 0) {
       systemFollowsProvider.updateCredentials(systemFollowsApiKey.trim());
+    }
+
+    const normalizedFlowEnv = flowEnvironment === 'SANDBOX' || flowEnvironment === 'PRODUCTION' ? flowEnvironment : undefined;
+    if (
+      (flowApiKey && typeof flowApiKey === 'string' && flowApiKey.trim().length > 0) ||
+      (flowSecretKey && typeof flowSecretKey === 'string' && flowSecretKey.trim().length > 0) ||
+      normalizedFlowEnv
+    ) {
+      flowProvider.updateCredentials({
+        ...(flowApiKey && typeof flowApiKey === 'string' && flowApiKey.trim().length > 0 && { apiKey: flowApiKey.trim() }),
+        ...(flowSecretKey && typeof flowSecretKey === 'string' && flowSecretKey.trim().length > 0 && { secretKey: flowSecretKey.trim() }),
+        ...(normalizedFlowEnv && { environment: normalizedFlowEnv }),
+      });
     }
 
     if (thresholds && typeof thresholds === 'object') {
       balanceService.setThresholds(thresholds);
     }
 
+    // Reconstruir catálogo comercial para reflejar inmediatamente cambios de precios o clave SystemFollows
+    catalogService.rebuildCommercialCatalog();
+
+    const floorPrices = pricingEngine.getPlanFloorPrices();
+
     // Persistir en Firestore
     await adminFirestore.collection('settings').doc('global').set({
       usdClpRate: pricingEngine.getExchangeRate(),
       defaultGlobalMarginPercent: pricingEngine.getDefaultMargin(),
-      ...(systemFollowsApiKey && { systemFollowsApiKey: systemFollowsApiKey.trim() }),
+      freeBasePriceCLP: floorPrices.freeBasePriceCLP,
+      freeMicroPriceCLP: floorPrices.freeMicroPriceCLP,
+      premiumBasePriceCLP: floorPrices.premiumBasePriceCLP,
+      ...(systemFollowsApiKey && typeof systemFollowsApiKey === 'string' && systemFollowsApiKey.trim() && { systemFollowsApiKey: systemFollowsApiKey.trim() }),
+      ...(flowApiKey && typeof flowApiKey === 'string' && flowApiKey.trim() && { flowApiKey: flowApiKey.trim() }),
+      ...(flowSecretKey && typeof flowSecretKey === 'string' && flowSecretKey.trim() && { flowSecretKey: flowSecretKey.trim() }),
+      ...(normalizedFlowEnv && { flowEnvironment: normalizedFlowEnv }),
       thresholds: balanceService.getThresholds(),
       updatedAt: new Date().toISOString(),
     }, { merge: true }).catch(console.warn);
@@ -684,7 +795,12 @@ apiRouter.post('/admin/settings', async (req: Request, res: Response) => {
       settings: {
         usdClpRate: pricingEngine.getExchangeRate(),
         defaultGlobalMarginPercent: pricingEngine.getDefaultMargin(),
+        freeBasePriceCLP: floorPrices.freeBasePriceCLP,
+        freeMicroPriceCLP: floorPrices.freeMicroPriceCLP,
+        premiumBasePriceCLP: floorPrices.premiumBasePriceCLP,
         systemFollowsConfigured: systemFollowsProvider.isConfigured(),
+        flowConfigured: flowProvider.isConfigured(),
+        flowEnvironment: flowProvider.getEnvironment(),
         thresholds: balanceService.getThresholds(),
       },
     });

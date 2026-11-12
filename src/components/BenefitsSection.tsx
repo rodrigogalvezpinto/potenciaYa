@@ -4,20 +4,20 @@ import { ShieldCheck, Zap, RotateCcw, Headphones, DollarSign, Award } from 'luci
 export const BenefitsSection: React.FC = () => {
   const benefits = [
     {
-      title: 'Seguridad 100% Garantizada',
+      title: '100% Seguro (Sin Contraseñas)',
       desc: 'No solicitamos contraseñas, accesos ni tokens personales. Solo requerimos el enlace público de tu perfil o publicación.',
       icon: ShieldCheck,
       color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
     },
     {
       title: 'Precios Mayoristas Directos',
-      desc: 'Eliminamos intermediarios costosos para ofrecer tarifas mayoristas directas calculadas transparentemente en pesos chilenos.',
+      desc: 'Eliminamos intermediarios costosos para ofrecer tarifas transparentes calculadas directamente en pesos chilenos (CLP).',
       icon: DollarSign,
       color: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
     },
     {
-      title: 'Garantía de Reposición (Refill)',
-      desc: 'Si una red social realiza una actualización y se reduce el conteo en servicios elegibles, lo reponemos sin costo por 30 días.',
+      title: 'Planes Free y Premium',
+      desc: 'Elige entre Plan Free de entrada económica y rápida o Plan Premium con rutas seleccionadas de mayor estabilidad.',
       icon: RotateCcw,
       color: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
     },
@@ -29,23 +29,23 @@ export const BenefitsSection: React.FC = () => {
     },
     {
       title: 'Entrega Gradual y Natural',
-      desc: 'Diseñado respetando los ritmos de cada algoritmo social para proteger la integridad y reputación de tu cuenta.',
+      desc: 'Diseñado respetando los ritmos de cada plataforma para acompañar el crecimiento orgánico de tu cuenta.',
       icon: Award,
       color: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
     },
     {
-      title: 'Soporte y Trazabilidad',
-      desc: 'Historial completo con identificador de transacción bancaria y estado en vivo de cada uno de tus pedidos.',
+      title: 'Trazabilidad y Avance en Vivo',
+      desc: 'Historial completo con identificador de transacción Flow y progreso de entrega actualizado en tiempo real.',
       icon: Headphones,
       color: 'text-sky-400 bg-sky-500/10 border-sky-500/20',
     },
   ];
 
   return (
-    <section id="garantias" className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <section id="ventajas" className="py-16 sm:py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div className="text-center max-w-2xl mx-auto mb-14">
         <span className="text-xs font-bold uppercase tracking-wider text-rose-400 bg-rose-500/10 border border-rose-500/20 px-3 py-1 rounded-full">
-          Garantías del Servicio
+          Ventajas de la Plataforma
         </span>
         <h2 className="text-2xl sm:text-4xl font-extrabold text-white mt-3 tracking-tight">
           Por Qué Elegir PotenciaRedes

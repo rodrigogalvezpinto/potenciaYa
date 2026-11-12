@@ -80,6 +80,98 @@ export const CustomerDashboard: React.FC = () => {
     fetchOrders();
   }, [user]);
 
+  // Verificación automática con Flow cuando hay órdenes esperando confirmación de pago
+  const stoppedPollIdsRef = React.useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const awaitingOrders = orders.filter(
+      o => o.status === 'AWAITING_PAYMENT' && !stoppedPollIdsRef.current.has(o.id)
+    );
+    if (awaitingOrders.length === 0) return;
+
+    const verifyPendingWithFlow = async () => {
+      for (const ord of awaitingOrders) {
+        if (stoppedPollIdsRef.current.has(ord.id)) continue;
+        try {
+          const res = await fetch('/api/payments/flow/confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: ord.paymentId, orderId: ord.id }),
+          });
+          const data = await res.json();
+          if (data.success && data.order) {
+            setOrders(prev => prev.map(o => (o.id === ord.id ? data.order : o)));
+            setMessage({ type: 'success', text: `¡Flow confirmó el pago de la orden ${ord.id}! Tu pedido fue despachado.` });
+          } else if (data.status === 'CANCELED' || data.status === 'REJECTED') {
+            stoppedPollIdsRef.current.add(ord.id);
+          }
+        } catch {}
+      }
+    };
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        verifyPendingWithFlow();
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    const interval = setInterval(verifyPendingWithFlow, 8000);
+
+    return () => {
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      clearInterval(interval);
+    };
+  }, [orders]);
+
+  // Refresco automático en vivo desde SystemFollows cuando hay órdenes activas en proceso
+  useEffect(() => {
+    const activeIds = orders
+      .filter(
+        o =>
+          o.providerOrderId &&
+          (o.status === 'IN_PROGRESS' || o.status === 'PENDING' || o.status === 'SUBMITTED' || o.status === 'PARTIAL')
+      )
+      .map(o => o.id);
+
+    if (activeIds.length === 0) return;
+
+    const refreshActive = async () => {
+      try {
+        const res = await fetch('/api/orders/refresh-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderIds: activeIds }),
+        });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.orders) && data.orders.length > 0) {
+          const updatedMap = new Map<string, CommercialOrder>(
+            data.orders.map((o: CommercialOrder) => [o.id, o])
+          );
+          setOrders(prev => prev.map(o => updatedMap.get(o.id) || o));
+          setSelectedOrder(prev => (prev ? updatedMap.get(prev.id) || prev : null));
+        }
+      } catch {}
+    };
+
+    const interval = setInterval(refreshActive, 20000);
+    return () => clearInterval(interval);
+  }, [orders]);
+
+  const getOrderProgress = (order: CommercialOrder) => {
+    if (order.status === 'COMPLETED') {
+      return { percent: 100, delivered: order.quantity, remaining: 0 };
+    }
+    if (order.status === 'AWAITING_PAYMENT' || order.status === 'CANCELED' || order.status === 'FAILED') {
+      return { percent: 0, delivered: 0, remaining: order.quantity };
+    }
+    const remains = order.remains !== undefined ? Math.max(0, Math.min(order.quantity, order.remains)) : order.quantity;
+    const delivered = Math.max(0, order.quantity - remains);
+    const percent = order.quantity > 0 ? Math.min(100, Math.round((delivered / order.quantity) * 100)) : 0;
+    return { percent, delivered, remaining: remains };
+  };
+
   const handleRefreshStatus = async (orderId: string) => {
     setActionLoading(orderId);
     setMessage(null);
@@ -156,50 +248,80 @@ export const CustomerDashboard: React.FC = () => {
     }
   };
 
-  const handlePayWebpayPortal = (order: CommercialOrder) => {
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = 'https://www.webpay.cl/backpub/external/form-pay';
-    form.target = '_blank';
-
-    const inputId = document.createElement('input');
-    inputId.type = 'hidden';
-    inputId.name = 'idFormulario';
-    inputId.value = '436254';
-    form.appendChild(inputId);
-
-    const inputMonto = document.createElement('input');
-    inputMonto.type = 'hidden';
-    inputMonto.name = 'monto';
-    inputMonto.value = String(Math.round(order.totalPriceCLP));
-    form.appendChild(inputMonto);
-
-    document.body.appendChild(form);
-    form.submit();
-    document.body.removeChild(form);
-  };
-
-  const handleConfirmWebpayPayment = async (orderId: string) => {
-    const authCode = window.prompt('Ingresa el Código de Autorización de tu comprobante Transbank Webpay (o presiona Aceptar para validar):', '');
-    if (authCode === null) return;
-
-    setActionLoading(orderId);
+  const handlePayWithFlow = async (order: CommercialOrder) => {
+    setActionLoading(order.id);
     setMessage(null);
     try {
-      const res = await fetch('/api/payments/webpay/portal-confirm', {
+      let targetUrl = order.paymentUrl || '';
+      if (!targetUrl) {
+        const res = await fetch('/api/payments/flow/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: order.id }),
+        });
+        const data = await res.json();
+        if (!data.success || !data.payment?.redirectUrl) {
+          throw new Error(data.error || 'No se pudo generar el enlace de pago en Flow.');
+        }
+        targetUrl = String(data.payment.redirectUrl);
+        await fetchOrders();
+      }
+
+      const [baseAction, query] = targetUrl.split('?');
+      const params = new URLSearchParams(query || '');
+      const token = params.get('token') || order.paymentId || '';
+
+      const form = document.createElement('form');
+      form.method = 'GET';
+      form.action = baseAction;
+      form.target = '_blank';
+      form.rel = 'noopener noreferrer';
+
+      if (token) {
+        const inputToken = document.createElement('input');
+        inputToken.type = 'hidden';
+        inputToken.name = 'token';
+        inputToken.value = token;
+        form.appendChild(inputToken);
+      }
+
+      document.body.appendChild(form);
+      form.submit();
+      document.body.removeChild(form);
+
+      setMessage({
+        type: 'success',
+        text: 'Abrimos Flow Chile en una nueva pestaña. Al finalizar, presiona "Verificar Pago" si no te redirige automáticamente.',
+      });
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Error al conectar con Flow.' });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleVerifyFlowPayment = async (order: CommercialOrder) => {
+    setActionLoading(order.id);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/payments/flow/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, authorizationCode: authCode.trim() || undefined }),
+        body: JSON.stringify({ token: order.paymentId, orderId: order.id }),
       });
       const data = await res.json();
       if (data.success && data.order) {
-        setOrders(prev => prev.map(o => (o.id === orderId ? data.order : o)));
-        setMessage({ type: 'success', text: '¡Pago validado exitosamente! Tu pedido ha sido despachado.' });
+        setOrders(prev => prev.map(o => (o.id === order.id ? data.order : o)));
+        if (selectedOrder?.id === order.id) setSelectedOrder(data.order);
+        setMessage({ type: 'success', text: '¡Pago en Flow confirmado! Tu pedido fue despachado automáticamente.' });
       } else {
-        setMessage({ type: 'error', text: data.error || 'No se pudo confirmar el pago.' });
+        setMessage({
+          type: 'error',
+          text: data.message || data.error || 'El pago aún no figura como pagado en Flow.',
+        });
       }
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Error al confirmar pago.' });
+      setMessage({ type: 'error', text: err.message || 'Error al verificar el estado en Flow.' });
     } finally {
       setActionLoading(null);
     }
@@ -207,6 +329,8 @@ export const CustomerDashboard: React.FC = () => {
 
   const getStatusBadge = (status: OrderStatus) => {
     switch (status) {
+      case 'AWAITING_PAYMENT':
+        return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30">Esperando Pago</span>;
       case 'COMPLETED':
         return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Completado</span>;
       case 'IN_PROGRESS':
@@ -267,7 +391,7 @@ export const CustomerDashboard: React.FC = () => {
             Panel de Clientes & Mis Pedidos
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Consulta el estado en tiempo real, solicita reposiciones y descarga comprobantes en CLP.
+            Consulta el estado y avance en vivo de tus pedidos y descarga comprobantes en CLP.
           </p>
         </div>
 
@@ -445,44 +569,65 @@ export const CustomerDashboard: React.FC = () => {
                       <strong className="text-orange-400 font-bold">{formatCLP(order.totalPriceCLP)}</strong>
                     </div>
                   </div>
+
+                  {/* Barra de avance en vivo para órdenes pagadas/despachadas */}
+                  {order.status !== 'AWAITING_PAYMENT' && order.status !== 'CANCELED' && (() => {
+                    const prog = getOrderProgress(order);
+                    return (
+                      <div className="pt-2 max-w-md">
+                        <div className="flex items-center justify-between text-[11px] mb-1">
+                          <span className="text-slate-400">
+                            Avance de entrega:{' '}
+                            <strong className="text-white">
+                              {prog.delivered.toLocaleString('es-CL')} / {order.quantity.toLocaleString('es-CL')}
+                            </strong>
+                            {order.startCount !== undefined && (
+                              <span className="text-slate-500"> • Inicio: {order.startCount.toLocaleString('es-CL')}</span>
+                            )}
+                          </span>
+                          <span className={`font-bold ${prog.percent === 100 ? 'text-emerald-400' : 'text-sky-400'}`}>
+                            {prog.percent}%
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 ${
+                              prog.percent === 100
+                                ? 'bg-emerald-500'
+                                : 'bg-gradient-to-r from-orange-500 to-rose-500'
+                            }`}
+                            style={{ width: `${Math.max(order.status === 'IN_PROGRESS' ? 8 : 0, prog.percent)}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Acciones */}
                 <div className="flex flex-wrap items-center gap-2 self-end lg:self-center">
                   
-                  {/* Botón Pagar en Webpay si está pendiente */}
+                  {/* Acciones de pago con Flow si la orden está pendiente de pago */}
                   {order.status === 'AWAITING_PAYMENT' && (
                     <div className="flex items-center gap-1.5">
                       <button
-                        onClick={() => handlePayWebpayPortal(order)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-400 hover:to-rose-500 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
-                        title="Abrir formulario oficial Webpay.cl Transbank"
+                        onClick={() => handlePayWithFlow(order)}
+                        disabled={actionLoading === order.id}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+                        title="Abrir checkout seguro de Flow.cl"
                       >
-                        <span>💳</span>
-                        <span>Pagar en Webpay</span>
+                        <span>🇨🇱</span>
+                        <span>Pagar en Flow</span>
                       </button>
                       <button
-                        onClick={() => handleConfirmWebpayPayment(order.id)}
+                        onClick={() => handleVerifyFlowPayment(order)}
                         disabled={actionLoading === order.id}
                         className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-semibold transition-all cursor-pointer"
-                        title="Confirmar con comprobante o código de autorización"
+                        title="Consultar confirmación directa en la API de Flow.cl"
                       >
-                        <span>✓ Ya pagué</span>
+                        <span>✓ Verificar con Flow</span>
                       </button>
                     </div>
-                  )}
-
-                  {/* Botón Refill */}
-                  {order.refillAvailable && (order.status === 'COMPLETED' || order.status === 'IN_PROGRESS') && (
-                    <button
-                      onClick={() => handleRequestRefill(order.id)}
-                      disabled={actionLoading === order.id}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-semibold transition-all cursor-pointer"
-                      title="Garantía de reposición de 30 días"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>Refill</span>
-                    </button>
                   )}
 
                   {/* Refrescar Estado */}
@@ -548,7 +693,7 @@ export const CustomerDashboard: React.FC = () => {
               </div>
               <div className="flex justify-between py-1 border-b border-slate-800/60">
                 <span className="text-slate-400">Medio de pago:</span>
-                <span className="font-medium text-white">{selectedOrder.paymentGateway || 'Webpay Plus'}</span>
+                <span className="font-medium text-white">Flow Chile</span>
               </div>
               {selectedOrder.startCount !== undefined && (
                 <div className="flex justify-between py-1 border-b border-slate-800/60">

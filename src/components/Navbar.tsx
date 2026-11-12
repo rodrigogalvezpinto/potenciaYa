@@ -72,11 +72,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAuth, activeView, setActiv
             </a>
 
             <a
-              href="#garantias"
+              href="#ventajas"
               onClick={() => { if (activeView !== 'store') setActiveView('store'); }}
               className="px-3.5 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-900/60 transition-colors"
             >
-              Garantías & FAQ
+              Ventajas & FAQ
             </a>
 
             {user && (
