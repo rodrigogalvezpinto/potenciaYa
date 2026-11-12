@@ -240,8 +240,9 @@ export class OrderService {
       }
     }
 
-    if (params.quantity < minQty) {
-      throw new Error(`La cantidad mínima permitida es ${minQty.toLocaleString('es-CL')}.`);
+    const effectiveMinQty = Math.max(500, minQty);
+    if (!Number.isFinite(params.quantity) || params.quantity < effectiveMinQty) {
+      throw new Error(`La cantidad mínima permitida es ${effectiveMinQty.toLocaleString('es-CL')} unidades.`);
     }
 
     if (params.quantity > maxQty) {

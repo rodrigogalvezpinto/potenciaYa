@@ -142,8 +142,8 @@ apiRouter.post('/pricing/quote', (req: Request, res: Response) => {
     }
 
     const qty = parseInt(quantity, 10);
-    if (isNaN(qty) || qty <= 0) {
-      return res.status(400).json({ success: false, error: 'Cantidad inválida' });
+    if (isNaN(qty) || qty < 500) {
+      return res.status(400).json({ success: false, error: 'La cantidad mínima de compra es 500 unidades.' });
     }
 
     const calculation = pricingEngine.calculate(

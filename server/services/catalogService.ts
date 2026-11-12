@@ -458,6 +458,8 @@ export class CatalogService {
         );
         existing.commercialRateCLP = recalc.unitPricePer1000CLP;
         existing.originalRateUSD = currentTech.rateUSD;
+        existing.minQuantity = Math.max(500, currentTech.minQuantity);
+        existing.maxQuantity = Math.max(500, currentTech.maxQuantity);
         existing.refill = existing.tier === 'PREMIUM' ? currentTech.refill : false;
         existing.updatedAt = params.now;
         return;
@@ -477,8 +479,8 @@ export class CatalogService {
       provider: tech.provider,
       originalRateUSD: tech.rateUSD,
       commercialRateCLP: priceCalc.unitPricePer1000CLP,
-      minQuantity: tech.minQuantity,
-      maxQuantity: tech.maxQuantity,
+      minQuantity: Math.max(500, tech.minQuantity),
+      maxQuantity: Math.max(500, tech.maxQuantity),
       refill: params.tier === 'PREMIUM' ? Boolean(tech.refill) : false,
       refillDays: params.tier === 'PREMIUM' && tech.refill ? 30 : undefined,
       cancel: tech.cancel,
@@ -655,6 +657,10 @@ export class CatalogService {
         updates.refill = s.tier === 'PREMIUM' ? newTech.refill : false;
         updates.manualProviderSelection = true;
       }
+    }
+
+    if (updates.minQuantity !== undefined && !isNaN(Number(updates.minQuantity))) {
+      updates.minQuantity = Math.max(500, Number(updates.minQuantity));
     }
 
     if (updates.commercialRateCLP !== undefined && !isNaN(Number(updates.commercialRateCLP))) {

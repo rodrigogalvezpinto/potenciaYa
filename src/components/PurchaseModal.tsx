@@ -38,8 +38,9 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
 
   useEffect(() => {
     if (service) {
-      // Valor por defecto razonable dentro de los límites
-      const initialQty = Math.max(service.minQuantity, Math.min(1000, service.maxQuantity));
+      // Valor por defecto razonable dentro de los límites (siempre mínimo 500)
+      const effectiveMin = Math.max(500, service.minQuantity);
+      const initialQty = Math.max(effectiveMin, Math.min(1000, service.maxQuantity));
       setQuantity(initialQty);
       setTargetUrl('');
       setError(null);
@@ -48,7 +49,7 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
 
   // Recalcular cotización en tiempo real desde el backend
   useEffect(() => {
-    if (!service || !quantity) return;
+    if (!service || !quantity || quantity < Math.max(500, service.minQuantity)) return;
 
     const fetchQuote = async () => {
       try {
@@ -99,21 +100,23 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
     }
   };
 
+  const effectiveMinQty = Math.max(500, service.minQuantity);
+
   const quickQuantities = [
     { label: '500', val: 500 },
     { label: '1.000', val: 1000 },
     { label: '2.500', val: 2500 },
     { label: '5.000', val: 5000 },
     { label: '10.000', val: 10000 },
-  ].filter(q => q.val >= service.minQuantity && q.val <= service.maxQuantity);
+  ].filter(q => q.val >= effectiveMinQty && q.val <= service.maxQuantity);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    // Validar cantidad
-    if (quantity < service.minQuantity) {
-      setError(`La cantidad mínima permitida es ${service.minQuantity.toLocaleString('es-CL')}.`);
+    // Validar cantidad mínima global de 500
+    if (quantity < effectiveMinQty) {
+      setError(`La cantidad mínima permitida es ${effectiveMinQty.toLocaleString('es-CL')} unidades.`);
       return;
     }
     if (quantity > service.maxQuantity) {
@@ -283,14 +286,14 @@ export const PurchaseModal: React.FC<PurchaseModalProps> = ({ service, onClose, 
                 Cantidad deseada
               </label>
               <span className="text-[11px] text-slate-400">
-                Mín: {service.minQuantity.toLocaleString('es-CL')} / Máx: {service.maxQuantity.toLocaleString('es-CL')}
+                Mín: {effectiveMinQty.toLocaleString('es-CL')} / Máx: {service.maxQuantity.toLocaleString('es-CL')}
               </span>
             </div>
             
             <input
               type="number"
               required
-              min={service.minQuantity}
+              min={effectiveMinQty}
               max={service.maxQuantity}
               step={10}
               value={quantity}

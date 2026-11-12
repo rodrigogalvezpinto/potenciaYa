@@ -190,7 +190,8 @@ export class VerificationSuite {
       const resolvedFree = freeComm
         ? catalogService.resolveDispatchService({ commercialServiceId: freeComm.id, quantity: Math.max(freeComm.minQuantity, 500), tier: 'FREE' })
         : null;
-      const sampleQtys = [250, 500, 1000, 2500];
+      const sampleQtys = [500, 750, 1000, 2500];
+      const allMin500 = catalogService.getCommercialServices().every(c => c.minQuantity >= 500);
       const all990 = freeComm
         ? sampleQtys.every(q => {
             const calc = pricingEngine.calculate(freeComm.originalRateUSD, q, freeComm.id, freeComm.commercialCategory, 'FLOW', freeComm.tier);
@@ -199,13 +200,13 @@ export class VerificationSuite {
         : true;
       results.push({
         scenarioNumber: 9,
-        title: 'Selección más económica (Free), reposición (Premium) y redondeo .990',
-        passed: sorted.length > 0 && sorted[0].rateUSD <= sorted[sorted.length - 1].rateUSD && Boolean(resolvedFree?.technicalService) && all990,
-        details: `Tarifa mínima ($${sorted[0]?.rateUSD} USD) para Free, refill=true para Premium y redondeo estricto .990 CLP validado en todas las cantidades.`,
+        title: 'Selección más económica (Free), estabilidad (Premium), mínimo 500 y redondeo .990',
+        passed: sorted.length > 0 && sorted[0].rateUSD <= sorted[sorted.length - 1].rateUSD && Boolean(resolvedFree?.technicalService) && all990 && allMin500,
+        details: `Tarifa mínima ($${sorted[0]?.rateUSD} USD) para Free, rutas de alta estabilidad para Premium, mínimo >= 500 y redondeo estricto .990 CLP.`,
         timestamp: now,
       });
     } catch (e: any) {
-      results.push({ scenarioNumber: 9, title: 'Selección más económica (Free), reposición (Premium) y redondeo .990', passed: false, details: e.message, timestamp: now });
+      results.push({ scenarioNumber: 9, title: 'Selección más económica (Free), estabilidad (Premium), mínimo 500 y redondeo .990', passed: false, details: e.message, timestamp: now });
     }
 
     // 10. El proveedor tiene saldo insuficiente
